@@ -14,6 +14,9 @@ on:
       - 'pages/**'
       - 'utils/**'
       - 'config/**'
+      # conftest.py holds every fixture and the failure-diagnostics hook, so a
+      # change there can alter the outcome of the whole suite.
+      - 'conftest.py'
       - 'pytest.ini'
       - 'requirements.txt'
 
@@ -36,23 +39,60 @@ jobs:
           python-version: '3.11'
 
       - name: Wait for GitHub Pages Deployment
+        env:
+          GH_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "Polling https://apolskiy.github.io/ for deployment readiness..."
-          MAX_RETRIES=10
-          RETRY_COUNT=0
-          
-          until [ $RETRY_COUNT -ge $MAX_RETRIES ]
-          do
-            STATUS=$(curl -o /dev/null -s -w "%{http_code}" https://apolskiy.github.io/)
-            if [ "$STATUS" -eq 200 ]; then
-              echo "Live site is up and returning 200 OK."
+          # An HTTP 200 is NOT proof of freshness: the previously deployed build
+          # answers 200 just as happily. The old poll therefore succeeded on its
+          # first attempt while a deployment was still running, and the suite went
+          # on to test a moving target - early tests saw the old markup and later
+          # ones saw the new, which is exactly how a passing locator can time out
+          # in the same run.
+          #
+          # Gate on two real signals instead:
+          #   1. the site repository has no Pages deployment in flight, and
+          #   2. the served page reports the same ETag on consecutive polls, so
+          #      the CDN edge has settled on one version.
+          SITE_API="https://api.github.com/repos/apolskiy/apolskiy.github.io/actions/runs"
+          SITE_URL="https://apolskiy.github.io/"
+
+          count_runs() {
+            # Number of site deployments in the given state; 0 if the API is
+            # unreachable, so an API hiccup never blocks the pipeline.
+            curl -sf -H "Authorization: Bearer ${GH_API_TOKEN}" "${SITE_API}?status=$1" 2>/dev/null \
+              | python -c "import json,sys; print(json.load(sys.stdin).get('total_count',0))" 2>/dev/null \
+              || echo 0
+          }
+
+          echo "1/2 Waiting for any in-flight GitHub Pages deployment to finish..."
+          for _ in $(seq 1 30); do
+            ACTIVE=$(count_runs in_progress)
+            PENDING=$(count_runs queued)
+            if [ "$ACTIVE" -eq 0 ] && [ "$PENDING" -eq 0 ]; then
+              echo "    no deployment in flight"
               break
             fi
-            echo "Site returning status $STATUS. Waiting 10s..."
+            echo "    deployment in flight (in_progress=${ACTIVE} queued=${PENDING}); waiting 10s"
             sleep 10
-            RETRY_COUNT=$((RETRY_COUNT+1))
           done
-          sleep 10
+
+          echo "2/2 Waiting for the served page to settle at one version..."
+          PREVIOUS=""
+          STABLE=0
+          for _ in $(seq 1 24); do
+            CURRENT=$(curl -sI "$SITE_URL" | tr -d '\r' | awk 'tolower($1)=="etag:"{print $2}')
+            if [ -n "$CURRENT" ] && [ "$CURRENT" = "$PREVIOUS" ]; then
+              STABLE=$((STABLE + 1))
+            else
+              STABLE=0
+            fi
+            PREVIOUS="$CURRENT"
+            if [ "$STABLE" -ge 2 ]; then
+              echo "    page settled at ETag ${CURRENT}"
+              break
+            fi
+            sleep 5
+          done
 
       - name: Install Dependencies
         run: |
@@ -66,7 +106,11 @@ jobs:
 
       - name: Run Pylint Code Quality Checks
         run: |
-          pylint pages/ tests/ utils/ config/ || echo "Pylint completed with warnings."
+          # Blocking gate. The suite is held at 10.00/10, so a regression must
+          # fail the pipeline rather than print a warning into a log nobody
+          # reads. conftest.py is included: it is the largest single source file
+          # in the framework and was previously unchecked.
+          python -m pylint --fail-under=10 config pages utils tests conftest.py
 
       - name: Execute Playwright Suite
         env:
