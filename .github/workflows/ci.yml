@@ -39,17 +39,26 @@ jobs:
           python-version: '3.11'
 
       # Delay step to ensure GitHub Pages deployment completes on the live site
-      - name: Wait for GitHub Pages Deployment
+      - name: Wait for GitHub Pages Deployment to Propagate
         run: |
-          echo "Pausing execution for 90 seconds to allow GitHub Pages build & deployment..."
-          sleep 90
-          
-          echo "Verifying live site responsiveness..."
-          STATUS_CODE=$(curl -o /dev/null -s -w "%{http_code}" https://apolskiy.github.io/)
-          echo "Live site status: $STATUS_CODE"
-          if [ "$STATUS_CODE" -ne 200 ]; then
-            echo "Warning: Live site did not return 200 OK (Status: $STATUS_CODE). Proceeding with caution..."
-          fi
+            echo "Polling https://apolskiy.github.io/ for deployment readiness..."
+            MAX_RETRIES=15
+            RETRY_COUNT=0
+            
+            until [ $RETRY_COUNT -ge $MAX_RETRIES ]
+            do
+              STATUS=$(curl -o /dev/null -s -w "%{http_code}" https://apolskiy.github.io/)
+              if [ "$STATUS" -eq 200 ]; then
+                echo "Live site is up and returning 200 OK."
+                break
+              fi
+              echo "Site returning status $STATUS. Waiting 10s... (Attempt $((RETRY_COUNT+1))/$MAX_RETRIES)"
+              sleep 10
+              RETRY_COUNT=$((RETRY_COUNT+1))
+            done
+            
+            # Additional safety buffer for CDN cache propagation
+            sleep 15
 
       - name: Install Dependencies
         run: |

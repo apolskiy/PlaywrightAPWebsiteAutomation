@@ -1,15 +1,23 @@
-"""Pytest fixtures, viewport provisioning, and AI failure-diagnostics wiring.
+"""Pytest fixtures, viewport provisioning, and failure-diagnostics wiring.
 
 Every browser context in this suite is created here with an explicit viewport so
 that the responsive assertions in ``tests/test_responsive.py`` are reproducible
-rather than dependent on the host window size. The module also installs the
-``pytest_runtest_makereport`` wrapper that captures a DOM snapshot, a screenshot,
-and - when enabled - a Claude root-cause report for any failing test.
+rather than dependent on the host window size.
+
+The module also installs the ``pytest_runtest_makereport`` wrapper that, for any
+failing test, attaches to the Allure report: a full-page screenshot, the fully
+rendered DOM, a Playwright trace of the whole test, and - when enabled - a Claude
+root-cause analysis. Tracing runs for every test but the artifact is written only
+on failure, so a green run leaves nothing behind.
 """
 
 from __future__ import annotations
 
+import re
 from collections.abc import Generator, Iterator
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Final
 
 import allure
 import pytest
@@ -20,6 +28,19 @@ from pages.base_page import BasePage
 from pages.landing_page import LandingPage
 from pages.route_page import RoutePage
 from utils.claude_inspector import ClaudeTestInspector, FailureContext
+
+#: Directories the suite writes into. Created up front so a fresh clone, a
+#: cleaned workspace, or a CI runner never fails merely because an output
+#: directory is absent.
+ARTIFACT_DIRECTORIES: Final[tuple[str, ...]] = (
+    "reports",
+    "reports/traces",
+    "allure-results",
+)
+
+#: Characters that are unsafe in a filename, replaced when a pytest node id is
+#: turned into a trace file name.
+UNSAFE_FILENAME_PATTERN: Final[re.Pattern[str]] = re.compile(r"[^A-Za-z0-9._-]+")
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -40,48 +61,89 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     )
 
 
-class DiagnosticsRegistry:
-    """Tracks the live Page Object of each running test for failure capture.
+def pytest_configure(config: pytest.Config) -> None:
+    """Create the report and artifact directories before the session starts.
 
-    Pytest hooks cannot request fixtures, so the fixtures publish their Page
-    Object here and the ``makereport`` hook looks it up by node id. Entries are
-    removed during fixture teardown, which runs after the call-phase report.
+    Runs once, ahead of collection and ahead of any reporting plugin writing its
+    first file. Paths are resolved against the rootdir rather than the process
+    working directory, so the directories land beside the project no matter
+    where ``pytest`` was invoked from.
+
+    Args:
+        config: The active pytest configuration, used for its rootdir.
+    """
+    for directory_name in ARTIFACT_DIRECTORIES:
+        (config.rootpath / directory_name).mkdir(parents=True, exist_ok=True)
+
+
+@dataclass
+class ActiveSession:
+    """The live browser objects belonging to one running test.
+
+    Attributes:
+        page_object: The Page Object driving the test's browser page.
+        context: The browser context that owns the page, and the tracing session.
+        trace_saved: Whether the trace has already been written to disk. Guards
+            against stopping the same tracing session twice, which Playwright
+            rejects.
+    """
+
+    page_object: BasePage
+    context: BrowserContext
+    trace_saved: bool = field(default=False)
+
+
+class DiagnosticsRegistry:
+    """Tracks the live browser session of each running test for failure capture.
+
+    Pytest hooks cannot request fixtures, so the fixtures publish their session
+    here and the ``makereport`` hook looks it up by node id. Entries are removed
+    during fixture teardown, which runs after the call-phase report.
     """
 
     def __init__(self) -> None:
-        self._pages_by_node_id: dict[str, BasePage] = {}
+        self._sessions_by_node_id: dict[str, ActiveSession] = {}
         self._inspector: ClaudeTestInspector | None = None
 
-    def register_page(self, node_id: str, page_object: BasePage) -> None:
-        """Associate a Page Object with the test that owns it.
+    def register_session(
+        self, node_id: str, page_object: BasePage, context: BrowserContext
+    ) -> ActiveSession:
+        """Associate a browser session with the test that owns it.
 
         Args:
             node_id: Pytest node identifier of the owning test.
             page_object: The Page Object driving that test's browser page. Any
                 :class:`~pages.base_page.BasePage` subclass is accepted, so
                 landing-page and discovered-route tests share one capture path.
-        """
-        self._pages_by_node_id[node_id] = page_object
+            context: The browser context backing the page.
 
-    def release_page(self, node_id: str) -> None:
-        """Forget the Page Object owned by a finished test.
+        Returns:
+            The registered session, so the caller can consult ``trace_saved``
+            during teardown.
+        """
+        session = ActiveSession(page_object=page_object, context=context)
+        self._sessions_by_node_id[node_id] = session
+        return session
+
+    def release_session(self, node_id: str) -> None:
+        """Forget the session owned by a finished test.
 
         Args:
             node_id: Pytest node identifier of the finished test.
         """
-        self._pages_by_node_id.pop(node_id, None)
+        self._sessions_by_node_id.pop(node_id, None)
 
-    def page_for(self, node_id: str) -> BasePage | None:
-        """Look up the Page Object owned by a test.
+    def session_for(self, node_id: str) -> ActiveSession | None:
+        """Look up the session owned by a test.
 
         Args:
             node_id: Pytest node identifier of the test.
 
         Returns:
-            The registered Page Object, or ``None`` for tests that never opened
-            a browser page.
+            The registered session, or ``None`` for tests that never opened a
+            browser page.
         """
-        return self._pages_by_node_id.get(node_id)
+        return self._sessions_by_node_id.get(node_id)
 
     def inspector(self, settings: Settings) -> ClaudeTestInspector:
         """Return the shared Claude inspector, building it on first use.
@@ -123,10 +185,12 @@ def fixture_configure_assertion_timeout(framework_settings: Settings) -> None:
 def _open_context(
     browser: Browser, viewport: dict[str, int], *, javascript_enabled: bool = True
 ) -> BrowserContext:
-    """Create an isolated browser context with a fixed viewport.
+    """Create an isolated, tracing browser context with a fixed viewport.
 
     A dedicated context per test guarantees a clean cookie jar, storage, and
     viewport, so tests can run in any order or in parallel without interference.
+    Tracing is armed immediately: a trace can only capture actions that happen
+    after it starts, so it must be running before the test touches the page.
 
     Args:
         browser: The session-scoped Playwright browser.
@@ -137,11 +201,29 @@ def _open_context(
     Returns:
         The newly created context. The caller owns closing it.
     """
-    return browser.new_context(
+    context = browser.new_context(
         viewport=viewport,
         java_script_enabled=javascript_enabled,
         ignore_https_errors=False,
     )
+    context.tracing.start(screenshots=True, snapshots=True, sources=False)
+    return context
+
+
+def _discard_trace(session: ActiveSession) -> None:
+    """Stop tracing without writing an artifact, for a test that passed.
+
+    Args:
+        session: The session whose tracing should be torn down. Sessions whose
+            trace was already saved on failure are left alone.
+    """
+    if session.trace_saved:
+        return
+    try:
+        session.context.tracing.stop()
+    except PlaywrightError:
+        # The context is already gone; there is no tracing session to stop.
+        pass
 
 
 def _provision_landing_page(
@@ -157,7 +239,7 @@ def _provision_landing_page(
     Args:
         browser: The session-scoped Playwright browser.
         framework_settings: Resolved framework configuration.
-        node_id: Pytest node identifier used to register the page for failure
+        node_id: Pytest node identifier used to register the session for failure
             diagnostics.
         viewport: Viewport geometry applied to the new context.
         javascript_enabled: Set to ``False`` to exercise the site's ``noscript``
@@ -168,11 +250,12 @@ def _provision_landing_page(
     """
     context = _open_context(browser, viewport, javascript_enabled=javascript_enabled)
     landing_page = LandingPage(context.new_page(), framework_settings.base_url)
-    DIAGNOSTICS_REGISTRY.register_page(node_id, landing_page)
+    session = DIAGNOSTICS_REGISTRY.register_session(node_id, landing_page, context)
     try:
         yield landing_page
     finally:
-        DIAGNOSTICS_REGISTRY.release_page(node_id)
+        _discard_trace(session)
+        DIAGNOSTICS_REGISTRY.release_session(node_id)
         context.close()
 
 
@@ -188,7 +271,7 @@ def _provision_route_page(
 
     Args:
         browser: The session-scoped Playwright browser.
-        node_id: Pytest node identifier used to register the page for failure
+        node_id: Pytest node identifier used to register the session for failure
             diagnostics.
         viewport: Viewport geometry applied to the new context.
 
@@ -199,11 +282,12 @@ def _provision_route_page(
     context = _open_context(browser, viewport)
     route_page = RoutePage(context.new_page())
     route_page.record_diagnostics()
-    DIAGNOSTICS_REGISTRY.register_page(node_id, route_page)
+    session = DIAGNOSTICS_REGISTRY.register_session(node_id, route_page, context)
     try:
         yield route_page
     finally:
-        DIAGNOSTICS_REGISTRY.release_page(node_id)
+        _discard_trace(session)
+        DIAGNOSTICS_REGISTRY.release_session(node_id)
         context.close()
 
 
@@ -347,6 +431,48 @@ def _render_failure(call: pytest.CallInfo, report: pytest.TestReport) -> str:
     return str(report.longrepr)
 
 
+def _trace_path(item: pytest.Item) -> Path:
+    """Build the on-disk location of one test's Playwright trace.
+
+    Args:
+        item: The failing test item.
+
+    Returns:
+        A path under ``reports/traces`` whose name is derived from the node id.
+    """
+    safe_name = UNSAFE_FILENAME_PATTERN.sub("_", item.nodeid).strip("_")
+    return item.config.rootpath / "reports" / "traces" / f"{safe_name}.zip"
+
+
+def _attach_trace(item: pytest.Item, session: ActiveSession) -> None:
+    """Stop tracing, write the artifact, and attach it to the Allure report.
+
+    Args:
+        item: The failing test item.
+        session: The failing test's live browser session.
+    """
+    if session.trace_saved:
+        return
+    trace_path = _trace_path(item)
+    try:
+        session.context.tracing.stop(path=trace_path)
+        session.trace_saved = True
+        allure.attach(
+            trace_path.read_bytes(),
+            name="Playwright trace (open with 'playwright show-trace')",
+            attachment_type="application/zip",
+            extension="zip",
+        )
+    except (PlaywrightError, OSError) as trace_error:
+        # A trace is a nice-to-have. Never let capturing evidence become the
+        # reason a test reports something other than its real failure.
+        allure.attach(
+            f"Playwright trace could not be captured: {trace_error}",
+            name="Trace capture failed",
+            attachment_type=allure.attachment_type.TEXT,
+        )
+
+
 def _attach_failure_diagnostics(item: pytest.Item, error_text: str) -> None:
     """Capture page evidence and an optional AI triage report for a failure.
 
@@ -357,15 +483,16 @@ def _attach_failure_diagnostics(item: pytest.Item, error_text: str) -> None:
         item: The failing test item.
         error_text: Rendered representation of the failure.
     """
-    landing_page = DIAGNOSTICS_REGISTRY.page_for(item.nodeid)
-    if landing_page is None:
+    session = DIAGNOSTICS_REGISTRY.session_for(item.nodeid)
+    if session is None:
         return
+    page_object = session.page_object
 
     try:
-        dom_snapshot = landing_page.dom_snapshot()
-        page_url = landing_page.page.url
+        dom_snapshot = page_object.dom_snapshot()
+        page_url = page_object.page.url
         allure.attach(
-            landing_page.screenshot_png(),
+            page_object.screenshot_png(),
             name="Screenshot at failure",
             attachment_type=allure.attachment_type.PNG,
         )
@@ -377,6 +504,8 @@ def _attach_failure_diagnostics(item: pytest.Item, error_text: str) -> None:
     except (PlaywrightError, OSError):
         # The page or its context is already gone; there is nothing to capture.
         return
+
+    _attach_trace(item, session)
 
     settings = Settings.from_env()
     inspector = DIAGNOSTICS_REGISTRY.inspector(settings)

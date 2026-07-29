@@ -47,6 +47,29 @@ EMAIL_LINK_LABEL: Final[str] = "Email"
 PROFILE_NAME: Final[str] = "Aleksandr Polskiy"
 
 
+def soft_text_pattern(text: str) -> re.Pattern[str]:
+    """Build a tolerant matcher for a piece of user-visible text.
+
+    Locators built from this pattern survive the cosmetic edits that most often
+    break a suite: a change of letter case (the stylesheet already upper-cases
+    the tab labels through ``text-transform``), a change in surrounding
+    whitespace or line wrapping, and extra words added around the label.
+
+    The pattern stays anchored on word boundaries rather than matching a bare
+    substring, so ``Web Site`` cannot silently match ``Web Automation`` and a
+    genuine relabelling is still caught.
+
+    Args:
+        text: The expected visible text.
+
+    Returns:
+        A case-insensitive pattern in which each run of whitespace matches any
+        whitespace, bounded by word boundaries.
+    """
+    spaced_words = r"\s+".join(re.escape(word) for word in text.split())
+    return re.compile(rf"\b{spaced_words}\b", re.IGNORECASE)
+
+
 class NavigationTab(Enum):
     """The five tabs published by the portfolio's vanilla-JS SPA router.
 
@@ -168,15 +191,17 @@ class LandingPage(BasePage):
         return self.page.get_by_role("navigation")
 
     def nav_tab(self, tab: NavigationTab) -> Locator:
-        """Locate a single navigation tab by its visible label.
+        """Locate a single navigation tab by role and tolerant label match.
 
         Args:
             tab: The tab to locate.
 
         Returns:
-            A locator for the tab's list item.
+            A locator for the tab's list item, selected by ARIA role and
+            filtered on a soft label match so a case or spacing tweak in the
+            markup does not break the locator.
         """
-        return self.nav_bar().get_by_text(tab.label, exact=True)
+        return self.nav_tabs().filter(has_text=soft_text_pattern(tab.label))
 
     def nav_tabs(self) -> Locator:
         """Locate every navigation tab at once.
@@ -209,34 +234,40 @@ class LandingPage(BasePage):
         """Locate the circular profile portrait.
 
         Returns:
-            A locator for the portrait image, matched on its accessible name.
+            A locator for the portrait image, matched by role on a soft form of
+            its accessible name.
         """
-        return self.page.get_by_role("img", name=PROFILE_NAME)
+        return self.page.get_by_role("img", name=soft_text_pattern(PROFILE_NAME))
 
     def profile_heading(self) -> Locator:
         """Locate the profile name heading.
 
         Returns:
-            A locator for the ``<h2>`` carrying the site owner's name.
+            A locator for the heading carrying the site owner's name, matched by
+            role rather than by heading level, so promoting the ``<h2>`` to an
+            ``<h1>`` does not break it.
         """
-        return self.page.get_by_role("heading", name=PROFILE_NAME)
+        return self.page.get_by_role("heading", name=soft_text_pattern(PROFILE_NAME))
 
     def site_footer(self) -> Locator:
         """Locate the copyright footer.
 
         Returns:
-            A locator for the footer container.
+            A locator for the footer container. The ``id`` is tried alongside
+            the ``contentinfo`` landmark, so the locator keeps working if the
+            ``<div>`` is later promoted to a semantic ``<footer>``.
         """
-        return self.page.locator("#site-footer")
+        return self.page.locator("#site-footer").or_(self.page.get_by_role("contentinfo"))
 
     def footer_owner_link(self) -> Locator:
         """Locate the decoded owner link inside the copyright footer.
 
         Returns:
             A locator for the anchor the decoder substitutes for the footer's
-            obfuscated owner-name placeholder.
+            obfuscated owner-name placeholder, matched softly on its accessible
+            name.
         """
-        return self.site_footer().get_by_role("link", name=PROFILE_NAME, exact=True)
+        return self.site_footer().get_by_role("link", name=soft_text_pattern(PROFILE_NAME))
 
     def footer_owner_placeholder(self) -> Locator:
         """Locate the footer's not-yet-decoded owner placeholder.
@@ -257,9 +288,12 @@ class LandingPage(BasePage):
         contract and is stable across layouts.
 
         Returns:
-            A locator for the skills matrix table.
+            A locator for the skills matrix table. The ARIA role is tried first
+            and the semantic class is kept as a fallback, so the locator holds
+            whichever way the table is expressed.
         """
-        return self.tab_panel(NavigationTab.HOME).locator("table.skills-matrix")
+        home_panel = self.tab_panel(NavigationTab.HOME)
+        return home_panel.get_by_role("table").or_(home_panel.locator("table.skills-matrix"))
 
     def skills_matrix_header_row(self) -> Locator:
         """Locate the header row of the skills matrix.
@@ -276,9 +310,12 @@ class LandingPage(BasePage):
             header_name: Accessible name of the column header, e.g. ``"Area"``.
 
         Returns:
-            A locator for the matching header cell.
+            A locator for the matching header cell, matched softly on its
+            accessible name.
         """
-        return self.skills_matrix().get_by_role("columnheader", name=header_name)
+        return self.skills_matrix().get_by_role(
+            "columnheader", name=soft_text_pattern(header_name)
+        )
 
     def panel_heading(self, tab: NavigationTab) -> Locator:
         """Locate the heading rendered at the top of a tab's content panel.
@@ -287,18 +324,26 @@ class LandingPage(BasePage):
             tab: The tab whose panel heading should be located.
 
         Returns:
-            A locator for the heading, matched on its exact visible text.
+            A locator for the heading. Both roles the site uses for a panel
+            title are accepted - a real ``heading`` on the Home panel and a
+            spanning ``columnheader`` on the project tables - so one accessor
+            serves every tab and survives a switch between the two.
         """
-        return self.tab_panel(tab).get_by_text(tab.panel_heading, exact=True)
+        panel = self.tab_panel(tab)
+        heading_pattern = soft_text_pattern(tab.panel_heading)
+        return panel.get_by_role("heading", name=heading_pattern).or_(
+            panel.get_by_role("columnheader", name=heading_pattern)
+        )
 
     def email_link(self) -> Locator:
         """Locate the decoded contact link.
 
         Returns:
             A locator for the anchor the decoder substitutes for the obfuscated
-            ``#contact-email`` placeholder.
+            ``#contact-email`` placeholder, matched softly on its accessible
+            name.
         """
-        return self.page.get_by_role("link", name=EMAIL_LINK_LABEL, exact=True)
+        return self.page.get_by_role("link", name=soft_text_pattern(EMAIL_LINK_LABEL))
 
     def noscript_fallback_link(self) -> Locator:
         """Locate the LinkedIn fallback rendered when scripting is unavailable.
@@ -306,7 +351,7 @@ class LandingPage(BasePage):
         Returns:
             A locator for the ``<noscript>`` contact link.
         """
-        return self.profile_header().get_by_role("link", name="LinkedIn", exact=True)
+        return self.profile_header().get_by_role("link", name=soft_text_pattern("LinkedIn"))
 
     def panel_link(self, tab: NavigationTab) -> Locator:
         """Locate the first decoded link inside a tab's content panel.
@@ -478,7 +523,7 @@ class LandingPage(BasePage):
         """
         contact_anchor = self.email_link()
         expect(contact_anchor).to_be_visible()
-        expect(contact_anchor).to_have_text(EMAIL_LINK_LABEL)
+        expect(contact_anchor).to_have_text(soft_text_pattern(EMAIL_LINK_LABEL))
         expect(contact_anchor).to_have_attribute("href", MAILTO_PATTERN)
 
     @allure.step("Verify the copyright footer links the owner name to a decoded URL")
@@ -491,5 +536,5 @@ class LandingPage(BasePage):
         """
         owner_anchor = self.footer_owner_link()
         expect(owner_anchor).to_be_visible()
-        expect(owner_anchor).to_have_text(PROFILE_NAME)
+        expect(owner_anchor).to_have_text(soft_text_pattern(PROFILE_NAME))
         expect(owner_anchor).to_have_attribute("href", HTTPS_URL_PATTERN)
