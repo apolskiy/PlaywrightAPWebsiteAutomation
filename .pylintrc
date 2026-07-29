@@ -43,7 +43,9 @@ min-public-methods = 1
 # publishes is a public method by design. Splitting the landing page purely to
 # satisfy the default ceiling of 20 would scatter one screen across several
 # classes and make the tests harder to read.
-max-public-methods = 40
+# Raised from 40 when the Engineering Outcomes tab was added: its table, rows,
+# and Evidence cross-references contribute locators and two activation helpers.
+max-public-methods = 50
 
 [TYPECHECK]
 # Playwright's generated sync API is built dynamically; do not fail on members

@@ -48,9 +48,14 @@ EMAIL_LINK_LABEL: Final[str] = "Email"
 PROFILE_NAME: Final[str] = "Aleksandr Polskiy"
 
 #: Accessible name of the skills table, published by the page as an
-#: ``aria-label``. The Home panel holds several tables, so the role alone is
-#: ambiguous and the name is what makes the locator resolve to exactly one.
+#: ``aria-label``. Tables are addressed by accessible name rather than by an
+#: unqualified role so that adding a table to a panel cannot make an existing
+#: locator ambiguous.
 SKILLS_MATRIX_LABEL: Final[str] = "Technical Skills Matrix"
+
+#: Accessible name of the engineering-outcomes table, published as an
+#: ``aria-label``.
+OUTCOMES_TABLE_LABEL: Final[str] = "Selected Engineering Outcomes"
 
 
 def soft_text_pattern(text: str) -> re.Pattern[str]:
@@ -77,15 +82,24 @@ def soft_text_pattern(text: str) -> re.Pattern[str]:
 
 
 class NavigationTab(Enum):
-    """The five tabs published by the portfolio's vanilla-JS SPA router.
+    """The six tabs published by the portfolio's vanilla-JS SPA router.
 
     Each member carries the tab's visible label, the ``id`` of the content panel
     the router reveals, and the heading rendered at the top of that panel. Home
-    is the one tab whose panel heading differs from its label, because it hosts
-    the skills matrix rather than a project table.
+    and Engineering Outcomes are the two tabs whose panel heading differs from
+    the label, because they host a cross-project table rather than a single
+    project's table.
+
+    Declaration order matches the order the tabs appear in the navigation strip,
+    so a parametrized test reads in the same order a visitor encounters them.
     """
 
     HOME = ("Home", "aphome1", "Technical Skills Matrix")
+    ENGINEERING_OUTCOMES = (
+        "Engineering Outcomes",
+        "apoutcomes6",
+        "Selected Engineering Outcomes",
+    )
     REST_API = ("AI Assisted Rest API", "aprestapiclaude2", "AI Assisted Rest API")
     PORTFOLIO_WEBSITE = ("Portfolio Website", "apwebsite3", "Portfolio Website")
     WEB_AUTOMATION = ("Web Automation", "apwebtest4", "Web Automation")
@@ -187,6 +201,38 @@ class LandingPage(BasePage):
     # ------------------------------------------------------------------
     # Locators
     # ------------------------------------------------------------------
+
+    def follow_evidence_cross_reference(self, tab: NavigationTab) -> None:
+        """Click the Evidence control that opens a given project tab.
+
+        Args:
+            tab: The project tab the control names.
+
+        Returns:
+            None
+        """
+        with allure.step(f"Follow the Evidence cross-reference to '{tab.label}'"):
+            self.evidence_cross_reference_for(tab).click()
+
+    def activate_evidence_cross_reference_by_key(
+        self, tab: NavigationTab, key: str = "Enter"
+    ) -> None:
+        """Focus an Evidence control and activate it from the keyboard.
+
+        The controls carry a button role, so a pointer must not be the only way
+        to operate them.
+
+        Args:
+            tab: The project tab the control names.
+            key: The key to press once the control holds focus.
+
+        Returns:
+            None
+        """
+        with allure.step(f"Activate the '{tab.label}' cross-reference with {key}"):
+            control = self.evidence_cross_reference_for(tab)
+            control.focus()
+            control.press(key)
 
     def nav_bar(self) -> Locator:
         """Locate the navigation landmark holding the tab strip.
@@ -330,6 +376,74 @@ class LandingPage(BasePage):
         return home_panel.get_by_role("table", name=SKILLS_MATRIX_LABEL).or_(
             home_panel.locator("table.skills-matrix")
         )
+
+    def outcomes_table(self) -> Locator:
+        """Locate the engineering-outcomes table on its own tab.
+
+        Returns:
+            A locator for the outcomes table, matched by accessible name with
+            the semantic class as a fallback.
+        """
+        panel = self.tab_panel(NavigationTab.ENGINEERING_OUTCOMES)
+        return panel.get_by_role("table", name=OUTCOMES_TABLE_LABEL).or_(
+            panel.locator("table.outcomes-table")
+        )
+
+    def outcome_rows(self) -> Locator:
+        """Locate every data row of the outcomes table.
+
+        Returns:
+            A locator for the ``tbody`` rows, one per published outcome. The
+            header row is excluded so a count reflects claims, not markup.
+        """
+        return self.outcomes_table().locator("tbody tr")
+
+    def evidence_cross_references(self) -> Locator:
+        """Locate every cross-reference control in the Evidence column.
+
+        These are not anchors: they open another tab of this single-page
+        application, and every anchor on the site is required to resolve to an
+        absolute ``https``/``mailto`` target. They are published as elements
+        with a button role instead.
+
+        Returns:
+            A locator for the ``span.tab-jump`` controls.
+        """
+        return self.outcomes_table().locator("span.tab-jump")
+
+    def citations_in_outcome_row(self, row_index: int) -> Locator:
+        """Locate the Evidence cross-references inside one outcome row.
+
+        Args:
+            row_index: Zero-based index of the row within ``tbody``.
+
+        Returns:
+            A locator for that row's cross-references, empty if the row cites
+            nothing.
+        """
+        return self.outcome_rows().nth(row_index).locator("span.tab-jump")
+
+    def evidence_cross_reference_for(self, tab: NavigationTab) -> Locator:
+        """Locate the first Evidence control that opens a given project tab.
+
+        Args:
+            tab: The tab the control is expected to open.
+
+        Returns:
+            A locator for the first matching cross-reference.
+        """
+        return self.evidence_cross_references().filter(
+            has_text=soft_text_pattern(tab.label)
+        ).first
+
+    def skills_matrix_rows(self) -> Locator:
+        """Locate the data rows of the skills matrix.
+
+        Returns:
+            A locator for the ``tbody`` rows, used as the reference for the
+            shared row-hover treatment.
+        """
+        return self.skills_matrix().locator("tbody tr")
 
     def skills_matrix_header_row(self) -> Locator:
         """Locate the header row of the skills matrix.
