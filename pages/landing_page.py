@@ -81,7 +81,7 @@ class NavigationTab(Enum):
 
     HOME = ("Home", "aphome1", "Technical Skills Matrix")
     REST_API = ("AI Assisted Rest API", "aprestapiclaude2", "AI Assisted Rest API")
-    WEB_SITE = ("Web Site", "apwebsite3", "Web Site")
+    PORTFOLIO_WEBSITE = ("Portfolio Website", "apwebsite3", "Portfolio Website")
     WEB_AUTOMATION = ("Web Automation", "apwebtest4", "Web Automation")
     HTTP_EMULATORS = ("HTTP Emulators", "aphttpemulators5", "HTTP Emulators")
 
