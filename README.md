@@ -1,5 +1,5 @@
 # Playwright AP Website Automation Framework
-
+#Aleksandr Polskiy
 A production-grade E2E web automation and dynamic route-discovery framework built with Python, Playwright, Pytest, and Claude AI diagnostics.
 
 Target Application: [https://apolskiy.github.io/](https://apolskiy.github.io/)
