@@ -1,8 +1,10 @@
 name: Playwright CI & E2E Regression Suite
 
+# Automatically cancel any outdated/in-flight run on the same branch or dispatch event
+# so only the latest push/deploy actually executes.
 concurrency:
-  group: playwright-e2e-execution
-  cancel-in-progress: false
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
 
 on:
   push:
