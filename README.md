@@ -43,6 +43,7 @@ PlaywrightAPWebsiteAutomation/
 │   ├── test_navigation.py         # Header integrity and SPA routing
 │   ├── test_responsive.py         # Desktop/mobile layout validation
 │   ├── test_link_obfuscation.py   # Base64 anti-scraping link and e-mail decoding
+│   ├── test_link_styling.py       # Shared interactive link hover styling
 │   └── test_dynamic_routes.py     # Health checks generated per discovered route
 ├── conftest.py                    # Viewport fixtures + AI failure-diagnostics hook
 ├── .env.example                   # Template for local configuration
@@ -201,6 +202,7 @@ Verified clean afterwards on every tab at 320px, 390px, and 600px, on both Chrom
 | `test_navigation.py` | 10 | Title, profile header, footer, default tab, per-tab panel exclusivity, tab deselection, persistent chrome, skills matrix |
 | `test_responsive.py` | 7 | Tab-strip wrapping, header suppression below the breakpoint, horizontal overflow on both viewports, stacked profile header |
 | `test_link_obfuscation.py` | 6 | Placeholder decoding, absolute/safe URL schemes, `noopener noreferrer` hardening, address never rendered as text, copyright owner link, `noscript` fallback |
+| `test_link_styling.py` | 1 | Copyright link shares the table hover colour, and hovering visibly changes it |
 | `test_dynamic_routes.py` | 5 × routes | Per discovered route: HTTP 200, console/network/JS error log, visible DOM root, desktop and mobile overflow |
 
-**28 tests** against the live site today (5 dynamic × 1 discovered route), growing automatically as pages are published.
+**29 tests** against the live site today (5 dynamic × 1 discovered route), growing automatically as pages are published.

@@ -1,0 +1,85 @@
+name: Playwright CI & E2E Regression Suite
+
+# Prevent concurrent executions from stepping on each other:
+# New runs will queue up and wait until the current active run finishes.
+concurrency:
+  group: playwright-e2e-execution
+  cancel-in-progress: false
+
+on:
+  # 1. Runs when automation code/scripts in this repo are pushed/merged to main
+  push:
+    branches: [ main ]
+    paths:
+      - 'tests/**'
+      - 'pages/**'
+      - 'utils/**'
+      - 'config/**'
+      - 'pytest.ini'
+      - 'requirements.txt'
+
+  # 2. Runs when apolskiy.github.io notifies this repo of website updates
+  repository_dispatch:
+    types: [ website_updated ]
+
+  # 3. Allows manual execution from the GitHub Actions tab
+  workflow_dispatch:
+
+jobs:
+  e2e-tests:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # Delay step to ensure GitHub Pages deployment completes on the live site
+      - name: Wait for GitHub Pages Deployment
+        run: |
+          echo "Pausing execution for 90 seconds to allow GitHub Pages build & deployment..."
+          sleep 90
+          
+          echo "Verifying live site responsiveness..."
+          STATUS_CODE=$(curl -o /dev/null -s -w "%{http_code}" https://apolskiy.github.io/)
+          echo "Live site status: $STATUS_CODE"
+          if [ "$STATUS_CODE" -ne 200 ]; then
+            echo "Warning: Live site did not return 200 OK (Status: $STATUS_CODE). Proceeding with caution..."
+          fi
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          playwright install --with-deps chromium
+
+      - name: Run Pylint Code Quality Checks
+        run: |
+          pylint pages/ tests/ utils/ config/ || echo "Pylint checks completed."
+
+      - name: Execute Playwright Suite & Crawl Routes
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          pytest
+
+      - name: Generate Allure Report
+        uses: simple-elf/allure-report-action@v1.7
+        if: always()
+        with:
+          allure_results: allure-results
+          allure_history: allure-history
+
+      - name: Upload Test Artifacts & Reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: execution-reports
+          path: |
+            reports/
+            allure-history/
+            test-results/
