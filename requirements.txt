@@ -25,10 +25,10 @@ pytest-html==4.2.0
 pytest-metadata==3.1.1
 
 # AI failure diagnostics
-anthropic==0.120.0
+anthropic==0.120.2
 
 # Visual regression comparison
-pillow==12.1.1
+pillow==12.3.0
 
 # Configuration
 python-dotenv==1.2.2
