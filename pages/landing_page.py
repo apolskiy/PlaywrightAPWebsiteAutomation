@@ -47,6 +47,11 @@ EMAIL_LINK_LABEL: Final[str] = "Email"
 #: Accessible name of the profile portrait, taken from its ``alt`` attribute.
 PROFILE_NAME: Final[str] = "Aleksandr Polskiy"
 
+#: Accessible name of the skills table, published by the page as an
+#: ``aria-label``. The Home panel holds several tables, so the role alone is
+#: ambiguous and the name is what makes the locator resolve to exactly one.
+SKILLS_MATRIX_LABEL: Final[str] = "Technical Skills Matrix"
+
 
 def soft_text_pattern(text: str) -> re.Pattern[str]:
     """Build a tolerant matcher for a piece of user-visible text.
@@ -306,19 +311,25 @@ class LandingPage(BasePage):
     def skills_matrix(self) -> Locator:
         """Locate the technical skills table on the Home tab.
 
-        The table is addressed by its own semantic class rather than by ARIA
-        role: the mobile stylesheet re-declares the row and cell ``display``
-        values, which makes the computed table role browser-dependent below the
-        breakpoint. The class name is part of the application's stylesheet
-        contract and is stable across layouts.
+        The Home panel holds more than one table - the skills matrix and the
+        engineering-outcomes table - so an unqualified table role is ambiguous
+        and would fail strict-mode evaluation. The role is therefore matched by
+        the table's accessible name, which the application publishes as an
+        ``aria-label``.
+
+        The semantic class is kept as a fallback for two reasons: the mobile
+        stylesheet re-declares the row and cell ``display`` values, which makes
+        the computed table role browser-dependent below the breakpoint; and the
+        fallback keeps this locator working against a deployment that predates
+        the ``aria-label``.
 
         Returns:
-            A locator for the skills matrix table. The ARIA role is tried first
-            and the semantic class is kept as a fallback, so the locator holds
-            whichever way the table is expressed.
+            A locator for the skills matrix table.
         """
         home_panel = self.tab_panel(NavigationTab.HOME)
-        return home_panel.get_by_role("table").or_(home_panel.locator("table.skills-matrix"))
+        return home_panel.get_by_role("table", name=SKILLS_MATRIX_LABEL).or_(
+            home_panel.locator("table.skills-matrix")
+        )
 
     def skills_matrix_header_row(self) -> Locator:
         """Locate the header row of the skills matrix.
