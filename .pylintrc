@@ -1,0 +1,54 @@
+[MAIN]
+# Analyse the framework packages and the test suites together so cross-package
+# imports (tests -> pages -> config) are resolved rather than reported missing.
+init-hook = 'import sys; sys.path.insert(0, ".")'
+ignore = .git,.idea,allure-results,reports,__pycache__
+jobs = 0
+
+[MESSAGES CONTROL]
+disable =
+    # Requesting a fixture shadows the fixture function name in the test's
+    # signature. That is the documented pytest idiom, not an accident.
+    redefined-outer-name,
+    # Test suites intentionally repeat arrange/assert shapes across modules;
+    # collapsing them behind helpers would hurt readability of the reports.
+    duplicate-code
+
+[FORMAT]
+max-line-length = 100
+indent-string = '    '
+
+[BASIC]
+# Enforce descriptive identifiers: reject one- and two-character names outright
+# rather than allowing the usual `i`, `x`, `df` escape hatches.
+good-names =
+argument-naming-style = snake_case
+variable-naming-style = snake_case
+attr-naming-style = snake_case
+function-naming-style = snake_case
+method-naming-style = snake_case
+class-naming-style = PascalCase
+const-naming-style = UPPER_CASE
+argument-rgx = ^[a-z][a-z0-9_]{2,40}$
+variable-rgx = ^[a-z_][a-z0-9_]{2,40}$
+attr-rgx = ^_?[a-z][a-z0-9_]{2,40}$
+inlinevar-rgx = ^[a-z][a-z0-9_]{2,40}$
+docstring-min-length = 1
+
+[DESIGN]
+max-args = 6
+max-attributes = 8
+min-public-methods = 1
+# A Page Object is a facade over one screen: every element and state query it
+# publishes is a public method by design. Splitting the landing page purely to
+# satisfy the default ceiling of 20 would scatter one screen across several
+# classes and make the tests harder to read.
+max-public-methods = 40
+
+[TYPECHECK]
+# Playwright's generated sync API is built dynamically; do not fail on members
+# pylint cannot resolve statically.
+generated-members = playwright.*
+
+[REPORTS]
+score = yes

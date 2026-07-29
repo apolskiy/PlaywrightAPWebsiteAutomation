@@ -1,0 +1,37 @@
+# Interpreter
+#   Developed and verified on CPython 3.14.2 (Windows, 64-bit).
+#   Minimum supported: 3.10 - the highest floor declared by any dependency
+#   below (playwright, pytest, pillow, python-dotenv, and pylint all require
+#   >=3.10). CI pins 3.14 to match the development interpreter.
+#
+# Versions below are the exact releases installed and exercised on this
+# machine: the full suite passes on Chromium and Firefox, and Pylint scores
+# 10.00/10, against precisely these pins.
+
+# Browser automation
+playwright==1.61.0
+pytest-playwright==0.8.0
+
+# Test runner
+pytest==9.1.1
+pytest-base-url==2.1.0
+
+# Reporting
+# allure-python-commons is a transitive dependency of allure-pytest, but its
+# version is lock-stepped with it - pin both so an upgrade cannot split them.
+allure-pytest==2.16.0
+allure-python-commons==2.16.0
+pytest-html==4.2.0
+pytest-metadata==3.1.1
+
+# AI failure diagnostics
+anthropic==0.120.0
+
+# Visual regression comparison
+pillow==12.1.1
+
+# Configuration
+python-dotenv==1.2.2
+
+# Static analysis
+pylint==4.0.6
