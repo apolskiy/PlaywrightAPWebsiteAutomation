@@ -36,7 +36,9 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          # Matches the development interpreter in requirements.txt, so a
+          # version-specific failure surfaces locally rather than only in CI.
+          python-version: '3.14'
 
       - name: Wait for GitHub Pages Deployment
         env:

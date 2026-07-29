@@ -1,6 +1,6 @@
 # Playwright AP Website Automation Framework
 
-A production-grade E2E web automation and visual regression testing framework built with Python, Playwright, Pytest, and Claude AI diagnostics.
+A production-grade E2E web automation and dynamic route-discovery framework built with Python, Playwright, Pytest, and Claude AI diagnostics.
 
 Target Application: [https://apolskiy.github.io/](https://apolskiy.github.io/)
 
@@ -11,7 +11,8 @@ Target Application: [https://apolskiy.github.io/](https://apolskiy.github.io/)
 - **Page Object Model (POM):** Clean separation of UI locators, interaction workflows, and assertion logic. Test modules contain zero raw selectors and never touch a Playwright `Page` directly.
 - **Dynamic Site Discovery:** An async Playwright crawler maps the site's route graph at collection time and writes `reports/sitemap.json`. Every discovered route is then parameterized into its own health-check tests, so publishing a new page grows the suite with no test edit.
 - **Cross-Viewport Coverage:** Every layout rule is asserted on both sides of the site's `max-width: 600px` breakpoint: desktop (1920x1080) and mobile (390x844).
-- **Event-Driven CI/CD Execution:** Runs on GitHub Actions on push, on a weekly schedule, and on a `repository_dispatch` fired by the target repository (`apolskiy.github.io`) whenever its `.html`, `.css`, or `.js` sources deploy.
+- **Event-Driven CI/CD Execution:** Runs on GitHub Actions on a push that touches framework sources, on manual `workflow_dispatch`, and on a `website_updated` `repository_dispatch`. Runs are deduplicated by a concurrency group scoped to workflow, event, and ref, so an outdated in-flight run is cancelled rather than racing the latest one.
+- **Deployment-Aware Gating:** Before any browser launches, CI waits for the target's Pages deployment to settle: first until the site repository reports no queued or in-progress Actions run, then until the served `ETag` repeats across consecutive polls. An HTTP 200 is not proof of freshness - the previous build answers 200 just as happily - and testing a half-propagated CDN is how a passing locator times out mid-run.
 - **Dual Reporting Engines:** Rich interactive **Allure HTML** reports plus standalone **Pytest HTML** execution summaries.
 - **AI-Powered Test Diagnostics:** On any failure the suite attaches a screenshot and a DOM snapshot, then asks Claude to classify the failure and propose a fix - attached to the Allure report as a structured triage note.
 - **Clean Code & Static Analysis:** PEP 8 compliance, Google-style docstrings, and strict type annotations, gated at **Pylint 10.00/10** in CI.
@@ -24,7 +25,7 @@ Target Application: [https://apolskiy.github.io/](https://apolskiy.github.io/)
 PlaywrightAPWebsiteAutomation/
 ├── .github/
 │   └── workflows/
-│       └── run_tests.yml          # Pylint gate + E2E job, event- and cron-driven
+│       └── ci.yml                 # Pages-deployment gate, Pylint gate, E2E job, Allure report
 ├── config/
 │   ├── __init__.py
 │   └── settings.py                # Environment loader, viewport and timeout constants
@@ -37,7 +38,7 @@ PlaywrightAPWebsiteAutomation/
 │   ├── __init__.py
 │   ├── claude_inspector.py        # Claude API failure triage helper
 │   ├── site_crawler.py            # Async sitemap crawler and route discovery engine
-│   └── visual_comparator.py       # Pillow image diff visual testing helper
+│   └── visual_comparator.py       # Pillow threshold image-diff helper (available; no test uses it yet)
 ├── tests/
 │   ├── __init__.py
 │   ├── test_navigation.py         # Header integrity and SPA routing
@@ -50,6 +51,7 @@ PlaywrightAPWebsiteAutomation/
 ├── .gitignore
 ├── .pylintrc                      # Static analysis configuration
 ├── pytest.ini                     # Pytest, Allure, & browser runtime flags
+├── LICENSE
 ├── README.md
 └── requirements.txt
 ```
@@ -58,7 +60,7 @@ PlaywrightAPWebsiteAutomation/
 
 ## Quick Start
 
-Requires **Python 3.10+**; developed, verified, and CI-pinned on **3.14**.
+Requires **Python 3.10+** - the highest floor declared by any pinned dependency. Developed, verified, and CI-pinned on **3.14**.
 
 ```bash
 pip install -r requirements.txt
@@ -75,6 +77,8 @@ python -m pytest --browser=firefox
 python -m pytest --browser=chromium --browser=firefox --browser=webkit
 python -m pytest --headed --slowmo 250          # watch a run locally
 ```
+
+The suite is verified locally on Chromium and Firefox. CI installs and runs Chromium only, so a WebKit-specific regression would not be caught by the pipeline.
 
 > `--browser` is intentionally absent from `pytest.ini`. `pytest-playwright` treats the flag as repeatable, so a value in `addopts` would be additive rather than overridable: `--browser=firefox` would run Chromium *and* Firefox. Chromium is already the plugin default, so omitting it keeps the default run identical while letting the command line select the engine outright.
 
@@ -164,7 +168,8 @@ On failure the suite attaches:
 
 1. A full-page **screenshot** at the moment of failure.
 2. The fully rendered **DOM snapshot**, including script-injected nodes.
-3. A **Claude root-cause analysis**: verdict (`application regression` / `test defect` / `environment flake` / `inconclusive`), the DOM evidence behind it, the probable cause, and a suggested fix.
+3. A **Playwright trace** (`reports/traces/`) with screenshots and DOM snapshots per step, openable in the Trace Viewer.
+4. A **Claude root-cause analysis**: verdict (`application regression` / `test defect` / `environment flake` / `inconclusive`), the DOM evidence behind it, the probable cause, and a suggested fix.
 
 The diagnostics hook is strictly advisory. A missing credential, a network failure, or an API error is logged as a warning and degrades to "no report": it never converts a product failure into an infrastructure failure, and never masks the real Playwright error.
 
@@ -191,7 +196,7 @@ Both are fixed in the site repository (`apolskiy/apolskiy.github.io`). The secon
 
 Verified clean afterwards on every tab at 320px, 390px, and 600px, on both Chromium and Firefox.
 
-> The suite runs against the live URL, so this test stays red until the CSS change is deployed to GitHub Pages.
+> Both fixes are live: `css/apolskiybiz.css` now carries `box-sizing: border-box` on the stacked profile-header cells and `overflow-wrap: anywhere` on the project tables, and the test passes against the deployed site.
 
 ---
 
@@ -199,10 +204,10 @@ Verified clean afterwards on every tab at 320px, 390px, and 600px, on both Chrom
 
 | Suite | Scenarios | Focus |
 | --- | --- | --- |
-| `test_navigation.py` | 10 | Title, profile header, footer, default tab, per-tab panel exclusivity, tab deselection, persistent chrome, skills matrix |
+| `test_navigation.py` | 11 | Title, profile header, self-hosted portrait, footer, default tab, per-tab panel exclusivity (one case per tab), tab deselection, persistent chrome, skills matrix |
 | `test_responsive.py` | 7 | Tab-strip wrapping, header suppression below the breakpoint, horizontal overflow on both viewports, stacked profile header |
 | `test_link_obfuscation.py` | 6 | Placeholder decoding, absolute/safe URL schemes, `noopener noreferrer` hardening, address never rendered as text, copyright owner link, `noscript` fallback |
 | `test_link_styling.py` | 1 | Copyright link shares the table hover color, and hovering visibly changes it |
 | `test_dynamic_routes.py` | 5 × routes | Per discovered route: HTTP 200, console/network/JS error log, visible DOM root, desktop and mobile overflow |
 
-**29 tests** against the live site today (5 dynamic × 1 discovered route), growing automatically as pages are published.
+**30 tests** collected against the live site today (5 dynamic × 1 discovered route), growing automatically as pages are published and as navigation tabs are added.
