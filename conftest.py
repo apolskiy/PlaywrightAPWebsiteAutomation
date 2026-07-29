@@ -509,7 +509,7 @@ def _attach_failure_diagnostics(item: pytest.Item, error_text: str) -> None:
 
     settings = Settings.from_env()
     inspector = DIAGNOSTICS_REGISTRY.inspector(settings)
-    triage_report = inspector.analyse_failure(
+    triage_report = inspector.analyze_failure(
         FailureContext(
             test_name=item.nodeid,
             page_url=page_url,

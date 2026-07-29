@@ -65,7 +65,7 @@ class FailureContext:
 
 
 class ClaudeTestInspector:
-    """Analyses failed tests with the Claude API and returns a triage report.
+    """Analyzes failed tests with the Claude API and returns a triage report.
 
     Args:
         settings: Resolved framework configuration supplying the credential,
@@ -98,7 +98,7 @@ class ClaudeTestInspector:
         """
         return self._settings.claude_model
 
-    def analyse_failure(self, failure_context: FailureContext) -> str | None:
+    def analyze_failure(self, failure_context: FailureContext) -> str | None:
         """Produce a root-cause report for one failed test.
 
         Args:
@@ -152,7 +152,7 @@ class ClaudeTestInspector:
         """Return the Anthropic client, constructing it on first use.
 
         Returns:
-            A memoised client bound to the configured API key.
+            A memoized client bound to the configured API key.
         """
         if self._client is None:
             self._client = anthropic.Anthropic(api_key=self._settings.claude_api_key)

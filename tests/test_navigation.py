@@ -42,6 +42,41 @@ def test_landing_page_exposes_owner_identity(desktop_page: LandingPage) -> None:
 
 @allure.epic(EPIC_NAME)
 @allure.feature(FEATURE_NAME)
+@allure.story("The profile portrait is a first-party asset that actually loads")
+@allure.severity(allure.severity_level.CRITICAL)
+def test_profile_photo_is_self_hosted_and_renders(desktop_page: LandingPage) -> None:
+    """The portrait must be served by the site and decode successfully.
+
+    Being visible is not enough: an ``<img>`` with alt text and fixed dimensions
+    still occupies space when its source 404s, so this checks the intrinsic size
+    the browser actually decoded.
+
+    Args:
+        desktop_page: Landing Page Object at the 1920x1080 viewport.
+    """
+    landing_page = desktop_page.navigate()
+
+    with allure.step("Verify the portrait is not served by a third party"):
+        assert landing_page.profile_photo_is_first_party(), (
+            "The profile portrait is loaded from an external origin "
+            f"({landing_page.profile_photo_source()}). Third-party image hosts "
+            "expire or block traffic, which breaks the page for every visitor; "
+            "serve the portrait from the site's own images/ directory."
+        )
+
+    with allure.step("Verify the portrait actually decoded"):
+        natural_width, natural_height = landing_page.image_natural_size(
+            landing_page.profile_photo()
+        )
+        assert natural_width > 0 and natural_height > 0, (
+            "The profile portrait did not load: the browser decoded it to "
+            f"{natural_width}x{natural_height}. The source "
+            f"'{landing_page.profile_photo_source()}' is missing or unreadable."
+        )
+
+
+@allure.epic(EPIC_NAME)
+@allure.feature(FEATURE_NAME)
 @allure.story("Home is the default tab on first load")
 @allure.severity(allure.severity_level.CRITICAL)
 def test_home_tab_is_selected_on_first_load(desktop_page: LandingPage) -> None:
@@ -73,7 +108,7 @@ def test_activating_a_tab_reveals_only_its_panel(
 
     Args:
         desktop_page: Landing Page Object at the 1920x1080 viewport.
-        selected_tab: The navigation tab exercised by this parametrisation.
+        selected_tab: The navigation tab exercised by this parametrization.
     """
     landing_page = desktop_page.navigate()
 
@@ -147,7 +182,7 @@ def test_home_panel_renders_the_skills_matrix(desktop_page: LandingPage) -> None
     with allure.step("Verify the skills matrix is present on the default tab"):
         expect(landing_page.skills_matrix()).to_be_visible()
 
-    with allure.step("Verify both column headers are labelled"):
+    with allure.step("Verify both column headers are labeled"):
         expect(landing_page.skills_matrix_column_header("Area")).to_be_visible()
         expect(
             landing_page.skills_matrix_column_header("Core Technologies & Methodologies")

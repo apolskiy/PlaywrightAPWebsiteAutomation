@@ -9,7 +9,7 @@ Target Application: [https://apolskiy.github.io/](https://apolskiy.github.io/)
 ## Key Features
 
 - **Page Object Model (POM):** Clean separation of UI locators, interaction workflows, and assertion logic. Test modules contain zero raw selectors and never touch a Playwright `Page` directly.
-- **Dynamic Site Discovery:** An async Playwright crawler maps the site's route graph at collection time and writes `reports/sitemap.json`. Every discovered route is then parameterised into its own health-check tests, so publishing a new page grows the suite with no test edit.
+- **Dynamic Site Discovery:** An async Playwright crawler maps the site's route graph at collection time and writes `reports/sitemap.json`. Every discovered route is then parameterized into its own health-check tests, so publishing a new page grows the suite with no test edit.
 - **Cross-Viewport Coverage:** Every layout rule is asserted on both sides of the site's `max-width: 600px` breakpoint: desktop (1920x1080) and mobile (390x844).
 - **Event-Driven CI/CD Execution:** Runs on GitHub Actions on push, on a weekly schedule, and on a `repository_dispatch` fired by the target repository (`apolskiy.github.io`) whenever its `.html`, `.css`, or `.js` sources deploy.
 - **Dual Reporting Engines:** Rich interactive **Allure HTML** reports plus standalone **Pytest HTML** execution summaries.
@@ -100,7 +100,7 @@ Diagnostics activate only when `AI_DIAGNOSTICS_ENABLED` is truthy **and** a key 
 
 **Locators.** Accessible locators (`get_by_role`, `get_by_text`) are used wherever the markup exposes a role or an accessible name. The application ships no `data-testid` attributes, so the tab panels - plain `<div>` elements carrying only an `id` - are addressed by a flat `#id` selector. Structural chains such as `div > ul > li:nth-child(2)` are never used.
 
-**Synchronisation.** There are no `wait_for_timeout` calls anywhere in the suite. The page decorates itself from a `DOMContentLoaded` listener, and readiness is expressed as an exact web-first assertion: the suite waits for the `span.enc-link` placeholder collection to drain to zero. Layout measurements settle the DOM with a visibility assertion before reading any bounding box.
+**Synchronization.** There are no `wait_for_timeout` calls anywhere in the suite. The page decorates itself from a `DOMContentLoaded` listener, and readiness is expressed as an exact web-first assertion: the suite waits for the `span.enc-link` placeholder collection to drain to zero. Layout measurements settle the DOM with a visibility assertion before reading any bounding box.
 
 **Assertions.** Checks that depend on DOM internals invisible to a test author - the `active` class toggled by the SPA router, the `mailto:` payload produced by the anti-scraping decoder - are published by the Page Object as `expect_*` helpers built on Playwright's retrying assertions. Everything else is exposed as a `Locator` so tests assert on it directly.
 
@@ -122,7 +122,7 @@ It renders each page in a real browser rather than fetching raw HTML - **this is
 | Bare fragments (`#projects`), resolved against the current page | `mailto:`, `tel:`, `javascript:`, `data:`, `file:`, `ftp:` |
 | Internal absolute URLs | Assets: `.pdf`, `.zip`, `.png`, `.css`, `.js`, fonts, media, Office documents |
 
-URLs are canonicalised before use, so an empty path and `/` collapse to one route: the site links to itself both ways, which would otherwise produce a duplicate. Traversal is bounded by `max_depth` (3) and `max_pages` (50) so a link cycle cannot hang collection, and a route that fails to navigate is still recorded with `status_code: 0` rather than vanishing.
+URLs are canonicalized before use, so an empty path and `/` collapse to one route: the site links to itself both ways, which would otherwise produce a duplicate. Traversal is bounded by `max_depth` (3) and `max_pages` (50) so a link cycle cannot hang collection, and a route that fails to navigate is still recorded with `status_code: 0` rather than vanishing.
 
 **Artifact**: `reports/sitemap.json`. Route records carry exactly the four specified fields; the surrounding envelope adds crawl context and any unhandled JavaScript exceptions caught via `pageerror` during the walk:
 
@@ -138,7 +138,7 @@ URLs are canonicalised before use, so an empty path and `/` collapse to one rout
 }
 ```
 
-**Parameterisation**: `tests/test_dynamic_routes.py` implements `pytest_generate_tests`, which resolves the route list once per session (memoised, since the hook fires per test function) and parameterises five health checks across it: HTTP 200, a clean console/network/JavaScript log, a visible and non-empty DOM root, and no horizontal overflow at either viewport. Test ids are the route paths, so a failure reads as `test_route_responds_with_http_200[/about.html-chromium]`.
+**Parameterization**: `tests/test_dynamic_routes.py` implements `pytest_generate_tests`, which resolves the route list once per session (memoized, since the hook fires per test function) and parameterizes five health checks across it: HTTP 200, a clean console/network/JavaScript log, a visible and non-empty DOM root, and no horizontal overflow at either viewport. Test ids are the route paths, so a failure reads as `test_route_responds_with_http_200[/about.html-chromium]`.
 
 ```bash
 python -m pytest                        # re-crawls during collection
@@ -202,7 +202,7 @@ Verified clean afterwards on every tab at 320px, 390px, and 600px, on both Chrom
 | `test_navigation.py` | 10 | Title, profile header, footer, default tab, per-tab panel exclusivity, tab deselection, persistent chrome, skills matrix |
 | `test_responsive.py` | 7 | Tab-strip wrapping, header suppression below the breakpoint, horizontal overflow on both viewports, stacked profile header |
 | `test_link_obfuscation.py` | 6 | Placeholder decoding, absolute/safe URL schemes, `noopener noreferrer` hardening, address never rendered as text, copyright owner link, `noscript` fallback |
-| `test_link_styling.py` | 1 | Copyright link shares the table hover colour, and hovering visibly changes it |
+| `test_link_styling.py` | 1 | Copyright link shares the table hover color, and hovering visibly changes it |
 | `test_dynamic_routes.py` | 5 × routes | Per discovered route: HTTP 200, console/network/JS error log, visible DOM root, desktop and mobile overflow |
 
 **29 tests** against the live site today (5 dynamic × 1 discovered route), growing automatically as pages are published.

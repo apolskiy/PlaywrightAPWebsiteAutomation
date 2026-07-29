@@ -1,7 +1,7 @@
 """Health checks generated dynamically from the crawler's route discovery.
 
 The route list is not written by hand. At collection time the suite either
-re-crawls the site or reuses ``reports/sitemap.json``, then parameterises every
+re-crawls the site or reuses ``reports/sitemap.json``, then parameterizes every
 test in this module across whatever it found. Publishing a new HTML page is
 therefore all it takes to grow the suite - no test edit required.
 
@@ -37,7 +37,7 @@ EXPECTED_STATUS_CODE = 200
 
 
 def _resolve_routes(config: pytest.Config) -> list[DiscoveredRoute]:
-    """Return the routes to parameterise over, crawling only when necessary.
+    """Return the routes to parameterize over, crawling only when necessary.
 
     Args:
         config: The pytest config, consulted for ``--use-cached-sitemap``.
@@ -48,9 +48,9 @@ def _resolve_routes(config: pytest.Config) -> list[DiscoveredRoute]:
         health check rather than a silently empty test suite.
     """
     framework_settings = Settings.from_env()
-    memoised_routes = _DISCOVERED_ROUTES.get(framework_settings.base_url)
-    if memoised_routes is not None:
-        return memoised_routes
+    memoized_routes = _DISCOVERED_ROUTES.get(framework_settings.base_url)
+    if memoized_routes is not None:
+        return memoized_routes
 
     routes: list[DiscoveredRoute] = []
     if config.getoption("--use-cached-sitemap"):
@@ -63,7 +63,7 @@ def _resolve_routes(config: pytest.Config) -> list[DiscoveredRoute]:
 
 
 def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
-    """Parameterise route-aware tests across every discovered route.
+    """Parameterize route-aware tests across every discovered route.
 
     Args:
         metafunc: The test function being collected.

@@ -1,5 +1,5 @@
 [MAIN]
-# Analyse the framework packages and the test suites together so cross-package
+# Analyze the framework packages and the test suites together so cross-package
 # imports (tests -> pages -> config) are resolved rather than reported missing.
 init-hook = 'import sys; sys.path.insert(0, ".")'
 ignore = .git,.idea,allure-results,reports,__pycache__

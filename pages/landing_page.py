@@ -24,6 +24,7 @@ from __future__ import annotations
 import re
 from enum import Enum
 from typing import Final
+from urllib.parse import urlparse
 
 import allure
 from playwright.sync_api import Locator, Page, expect
@@ -57,7 +58,7 @@ def soft_text_pattern(text: str) -> re.Pattern[str]:
 
     The pattern stays anchored on word boundaries rather than matching a bare
     substring, so ``Web Site`` cannot silently match ``Web Automation`` and a
-    genuine relabelling is still caught.
+    genuine relabeling is still caught.
 
     Args:
         text: The expected visible text.
@@ -239,6 +240,30 @@ class LandingPage(BasePage):
         """
         return self.page.get_by_role("img", name=soft_text_pattern(PROFILE_NAME))
 
+    def profile_photo_source(self) -> str:
+        """Read the portrait's ``src`` exactly as authored in the markup.
+
+        Returns:
+            The raw attribute value, which may be a relative path.
+        """
+        return self.profile_photo().get_attribute("src") or ""
+
+    def profile_photo_is_first_party(self) -> bool:
+        """Whether the portrait is served by the site rather than a third party.
+
+        A portrait hosted elsewhere is a availability risk the site does not
+        control: a signed or expiring CDN URL eventually stops resolving, which
+        breaks the page for every visitor.
+
+        Returns:
+            ``True`` when the source is a relative path or points at the site's
+            own host; ``False`` when it points at an external origin.
+        """
+        source = self.profile_photo_source()
+        if not source.lower().startswith(("http://", "https://")):
+            return True
+        return urlparse(source).netloc.lower() == urlparse(self._base_url).netloc.lower()
+
     def profile_heading(self) -> Locator:
         """Locate the profile name heading.
 
@@ -366,7 +391,7 @@ class LandingPage(BasePage):
         return self.tab_panel(tab).get_by_role("link").first
 
     def hover_color(self, link: Locator) -> str:
-        """Hover a link and read the colour it resolves to.
+        """Hover a link and read the color it resolves to.
 
         Args:
             link: A locator resolving to exactly one anchor.

@@ -8,7 +8,7 @@ requests-based crawler would therefore discover nothing.
 Discovery is breadth-first from the base URL, bounded by both depth and page
 count so a link cycle or an unexpectedly large site can never hang a test
 session. The resulting sitemap is written to ``reports/sitemap.json`` and is the
-input that ``tests/test_dynamic_routes.py`` parameterises over, so a newly added
+input that ``tests/test_dynamic_routes.py`` parameterizes over, so a newly added
 page grows the suite automatically.
 """
 
@@ -75,7 +75,7 @@ class DiscoveredRoute:
 
     @property
     def route_id(self) -> str:
-        """Human-readable identifier used as the pytest parametrisation id.
+        """Human-readable identifier used as the pytest parametrization id.
 
         Returns:
             The path and fragment of the route, e.g. ``/`` or ``/about#team``.
@@ -231,18 +231,18 @@ class SiteMapCrawler:
         internal_links: list[str] = []
         seen_links: set[str] = set()
         for raw_href in raw_hrefs:
-            candidate_url = self._normalise(raw_href, current_url)
+            candidate_url = self._normalize(raw_href, current_url)
             if candidate_url is not None and candidate_url not in seen_links:
                 seen_links.add(candidate_url)
                 internal_links.append(candidate_url)
         return internal_links
 
-    def _normalise(self, raw_href: str | None, current_url: str) -> str | None:
+    def _normalize(self, raw_href: str | None, current_url: str) -> str | None:
         """Resolve one ``href`` and decide whether it is a crawlable route.
 
         Relative paths (``/about``) and bare fragments (``#projects``) are
         resolved against the page they were found on. External hosts, non-HTTP
-        schemes, and asset files are rejected. Accepted URLs are canonicalised
+        schemes, and asset files are rejected. Accepted URLs are canonicalized
         so that spellings of the same document - notably an empty path versus
         ``/``, which this site links to itself both ways - collapse to one route
         instead of being crawled and reported twice.

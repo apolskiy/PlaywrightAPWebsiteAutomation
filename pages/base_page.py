@@ -103,16 +103,40 @@ class BasePage:
 
     @staticmethod
     def computed_color(locator: Locator) -> str:
-        """Read the resolved text colour of an element.
+        """Read the resolved text color of an element.
 
         Args:
             locator: A locator resolving to exactly one element.
 
         Returns:
-            The computed ``color`` property, always in the browser's normalised
+            The computed ``color`` property, always in the browser's normalized
             ``rgb(r, g, b)`` form regardless of how the stylesheet spelled it.
         """
         return str(locator.evaluate("element => getComputedStyle(element).color"))
+
+    @staticmethod
+    def image_natural_size(locator: Locator) -> tuple[int, int]:
+        """Read an image's intrinsic size once the browser has decoded it.
+
+        Visibility is not proof that an image loaded: an ``<img>`` with alt text
+        and explicit dimensions still occupies layout space when its source is
+        missing or forbidden. Intrinsic size is the honest signal - a broken
+        image reports ``0x0``.
+
+        Args:
+            locator: A locator resolving to exactly one ``<img>`` element.
+
+        Returns:
+            The ``(naturalWidth, naturalHeight)`` pair in pixels, or ``(0, 0)``
+            when the image failed to load.
+        """
+        width, height = locator.evaluate(
+            "async image => {"
+            "  try { await image.decode(); } catch (error) { /* broken source */ }"
+            "  return [image.naturalWidth, image.naturalHeight];"
+            "}"
+        )
+        return int(width), int(height)
 
     def has_horizontal_overflow(self) -> bool:
         """Detect whether the layout scrolls sideways at the current viewport.

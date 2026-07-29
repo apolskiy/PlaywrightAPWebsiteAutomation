@@ -6,7 +6,7 @@ __pycache__/
 venv/
 env/
 
-# Test artefacts
+# Test artifacts
 allure-results/
 allure-report/
 reports/
