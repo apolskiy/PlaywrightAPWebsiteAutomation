@@ -1,4 +1,4 @@
-"""Shared Playwright behaviour inherited by every Page Object in the suite.
+"""Shared Playwright behavior inherited by every Page Object in the suite.
 
 :class:`BasePage` owns the low-level browser plumbing (navigation, viewport
 control, DOM capture) so that concrete Page Objects only describe the semantics
