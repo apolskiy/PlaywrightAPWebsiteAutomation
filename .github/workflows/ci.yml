@@ -72,12 +72,25 @@ jobs:
         run: |
           pytest
 
-      - name: Generate Allure Report
-        uses: simple-elf/allure-report-action@v1.7
+      - name: Set up Java JDK
         if: always()
+        uses: actions/setup-java@v4
         with:
-          allure_results: allure-results
-          allure_history: allure-history
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Install Allure CLI
+        if: always()
+        run: |
+          ALLURE_VERSION="2.29.0"
+          curl -o allure.tgz -Ls https://github.com/allure-framework/allure2/releases/download/${ALLURE_VERSION}/allure-${ALLURE_VERSION}.tgz
+          tar -xzf allure.tgz
+          echo "$PWD/allure-${ALLURE_VERSION}/bin" >> $GITHUB_PATH
+
+      - name: Generate Allure Report
+        if: always()
+        run: |
+          allure generate allure-results --clean -o reports/allure-report
 
       - name: Upload Test Artifacts & Reports
         uses: actions/upload-artifact@v4
