@@ -27,7 +27,7 @@ from typing import Final
 from urllib.parse import urlparse
 
 import allure
-from playwright.sync_api import Locator, Page, expect
+from playwright.sync_api import Error as PlaywrightError, Locator, Page, expect
 
 from pages.base_page import BasePage
 
@@ -563,6 +563,44 @@ class LandingPage(BasePage):
             anchors.nth(anchor_index).get_attribute("href") or ""
             for anchor_index in range(anchors.count())
         ]
+
+    def outbound_link_targets(self) -> list[str]:
+        """Collect the distinct off-site ``https`` targets published by the page.
+
+        Returns:
+            Unique absolute targets whose host differs from the application's
+            own, in first-seen order. Internal page links and ``mailto:`` are
+            excluded: neither can rot in a way an HTTP status would reveal.
+        """
+        own_host = urlparse(self._base_url).netloc
+        seen: dict[str, None] = {}
+        for href in self.decoded_link_hrefs():
+            if not href.startswith("https://"):
+                continue
+            if urlparse(href).netloc == own_host:
+                continue
+            seen.setdefault(href, None)
+        return list(seen)
+
+    def url_status(self, url: str) -> int:
+        """Resolve one URL and report the status it answers with.
+
+        The request is issued through the browser's own request context rather
+        than a separate HTTP client, so no additional dependency is introduced
+        and the call inherits the browser's redirect handling.
+
+        Args:
+            url: An absolute URL.
+
+        Returns:
+            The final HTTP status code, or ``0`` when the request could not be
+            completed at all - a caller cannot distinguish a dead link from a
+            dead network without that difference.
+        """
+        try:
+            return int(self.page.request.get(url, timeout=20_000).status)
+        except PlaywrightError:
+            return 0
 
     def new_tab_link_count(self) -> int:
         """Count anchors that the decoder marked as opening in a new tab.

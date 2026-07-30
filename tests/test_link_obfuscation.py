@@ -16,8 +16,33 @@ from pages.landing_page import LandingPage
 EPIC_NAME = "Portfolio Website Quality"
 FEATURE_NAME = "Anti-Spam Link Obfuscation"
 
-#: URL schemes an anchor is allowed to use once decoding has completed.
+#: Schemes an outbound anchor is allowed to use once decoding has completed.
 ALLOWED_LINK_SCHEMES = ("https://", "mailto:")
+
+#: Suffixes that mark a scheme-less href as a link to another page of this site.
+#: The site publishes every *outbound* target as a base64 payload, but it also
+#: has genuine internal pages (the case study), and those are ordinary relative
+#: links. Bare fragments stay disallowed: an in-page jump here is either a dead
+#: link or a control that should not have been an anchor at all.
+INTERNAL_PAGE_SUFFIXES = (".html", "/")
+
+
+def is_safe_link_target(href: str) -> bool:
+    """Decide whether an anchor's ``href`` is an acceptable target.
+
+    Args:
+        href: The raw ``href`` attribute value.
+
+    Returns:
+        True for an absolute ``https``/``mailto`` target or a relative link to
+        another page of this site; False for a bare fragment, a relative path
+        that is not a page, or any other scheme.
+    """
+    if href.startswith(ALLOWED_LINK_SCHEMES):
+        return True
+    if href.startswith(("#", "/", "javascript:", "data:", "http://")):
+        return False
+    return href.endswith(INTERNAL_PAGE_SUFFIXES)
 
 
 @allure.epic(EPIC_NAME)
@@ -59,12 +84,57 @@ def test_decoded_links_use_absolute_safe_schemes(desktop_page: LandingPage) -> N
             name="Decoded link targets",
             attachment_type=allure.attachment_type.TEXT,
         )
-        unsafe_hrefs = [
-            href for href in decoded_hrefs if not href.startswith(ALLOWED_LINK_SCHEMES)
-        ]
+        unsafe_hrefs = [href for href in decoded_hrefs if not is_safe_link_target(href)]
         assert not unsafe_hrefs, (
-            "Decoded anchors must resolve to an absolute https or mailto target; "
-            f"found {unsafe_hrefs}."
+            "Every anchor must resolve to an absolute https/mailto target or to "
+            f"another page of this site; found {unsafe_hrefs}."
+        )
+
+
+@allure.epic(EPIC_NAME)
+@allure.feature("Outbound Link Integrity")
+@allure.story("Every published repository link still resolves")
+@allure.severity(allure.severity_level.NORMAL)
+def test_outbound_links_do_not_rot(desktop_page: LandingPage) -> None:
+    """Each off-site target the page advertises must still exist.
+
+    A portfolio's links decay silently: a repository is renamed or made private
+    and the page keeps advertising it. This resolves every distinct outbound
+    target and fails only on a definitive "gone" status, so a rate limit or a
+    transient network fault cannot turn link-rot detection into a flaky test.
+
+    Args:
+        desktop_page: Landing Page Object at the 1920x1080 viewport.
+    """
+    landing_page = desktop_page.navigate()
+
+    targets = landing_page.outbound_link_targets()
+
+    with allure.step(f"Resolve {len(targets)} distinct outbound targets"):
+        statuses = {target: landing_page.url_status(target) for target in targets}
+        allure.attach(
+            "\n".join(f"{status}  {target}" for target, status in statuses.items()),
+            name="Outbound link statuses",
+            attachment_type=allure.attachment_type.TEXT,
+        )
+
+    with allure.step("Verify the page advertises at least one outbound target"):
+        assert targets, (
+            "No outbound links were found. Either the decoder did not run or "
+            "the page stopped citing its own repositories."
+        )
+
+    with allure.step("Verify no target reports that it is gone"):
+        # 404/410 are the only statuses that prove the resource is not there.
+        # 401/403/429 mean "reachable but not to an anonymous, unthrottled
+        # caller", and 0 means the request never completed - none of those is
+        # evidence of rot, and failing on them would make this test a liability.
+        rotted = {
+            target: status for target, status in statuses.items() if status in (404, 410)
+        }
+        assert not rotted, (
+            f"These published links no longer resolve: {rotted}. A portfolio "
+            "that cites a missing repository is worse than one that cites none."
         )
 
 
