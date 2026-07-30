@@ -57,6 +57,9 @@ SKILLS_MATRIX_LABEL: Final[str] = "Technical Skills Matrix"
 #: ``aria-label``.
 OUTCOMES_TABLE_LABEL: Final[str] = "Selected Engineering Outcomes"
 
+#: Label of the project-table row that links a project's own documentation.
+DOCUMENTATION_ROW_LABEL: Final[str] = "Documentation"
+
 
 def soft_text_pattern(text: str) -> re.Pattern[str]:
     """Build a tolerant matcher for a piece of user-visible text.
@@ -502,6 +505,27 @@ class LandingPage(BasePage):
             A locator for the ``<noscript>`` contact link.
         """
         return self.profile_header().get_by_role("link", name=soft_text_pattern("LinkedIn"))
+
+    def documentation_link(self, tab: NavigationTab) -> Locator:
+        """Locate the documentation link published by a project panel.
+
+        Each project table carries a ``Documentation`` row whose cell holds a
+        single decoded anchor pointing at that project's README. The row is
+        matched by its label rather than by position, so re-ordering the table
+        cannot silently retarget this locator.
+
+        Args:
+            tab: The project tab whose documentation link is wanted.
+
+        Returns:
+            A locator for the anchor inside the ``Documentation`` row.
+        """
+        documentation_row = (
+            self.tab_panel(tab)
+            .get_by_role("row")
+            .filter(has_text=soft_text_pattern(DOCUMENTATION_ROW_LABEL))
+        )
+        return documentation_row.get_by_role("link")
 
     def panel_link(self, tab: NavigationTab) -> Locator:
         """Locate the first decoded link inside a tab's content panel.

@@ -48,6 +48,7 @@ PlaywrightAPWebsiteAutomation/
 │   ├── test_link_obfuscation.py   # Base64 anti-scraping link and e-mail decoding
 │   ├── test_link_styling.py       # Shared interactive link hover styling
 │   ├── test_engineering_outcomes.py  # Outcomes table and its cross-tab citations
+│   ├── test_project_panels.py     # Per-project panel completeness (documentation row)
 │   └── test_dynamic_routes.py     # Health checks generated per discovered route
 ├── conftest.py                    # Viewport fixtures + AI failure-diagnostics hook
 ├── .env.example                   # Template for local configuration
@@ -212,8 +213,9 @@ Verified clean afterwards on every tab at 320px, 390px, and 600px, on both Chrom
 | `test_responsive.py` | 7 | Tab-strip wrapping, header suppression below the breakpoint, horizontal overflow on both viewports, stacked profile header |
 | `test_link_obfuscation.py` | 7 | Placeholder decoding, safe URL schemes, outbound link-rot detection, `noopener noreferrer` hardening, address never rendered as text, copyright owner link, `noscript` fallback |
 | `test_link_styling.py` | 1 | Copyright link shares the table hover color, and hovering visibly changes it |
+| `test_project_panels.py` | 8 | Per project panel: a Documentation row linking that project's README, decoded to an absolute target and opening in a hardened new tab |
 | `test_dynamic_routes.py` | 5 × routes | Per discovered route: HTTP 200, console/network/JS error log, visible DOM root, desktop and mobile overflow |
 
-**45 tests** collected against the live site today (5 dynamic × 2 discovered routes), growing automatically as pages are published and as navigation tabs are added.
+**53 tests** collected against the live site today (5 dynamic × 2 discovered routes), growing automatically as pages are published and as navigation tabs are added.
 
 `test_navigation.py` and `test_engineering_outcomes.py` both grow on their own: the first parameterizes over `NavigationTab`, so publishing a tab adds a case, and the second parameterizes over the projects a citation may open.
