@@ -12,7 +12,8 @@ Target Application: [https://apolskiy.github.io/](https://apolskiy.github.io/)
 - **Dynamic Site Discovery:** An async Playwright crawler maps the site's route graph at collection time and writes `reports/sitemap.json`. Every discovered route is then parameterized into its own health-check tests, so publishing a new page grows the suite with no test edit.
 - **Cross-Viewport Coverage:** Every layout rule is asserted on both sides of the site's `max-width: 600px` breakpoint: desktop (1920x1080) and mobile (390x844).
 - **Evidence-Integrity Checks:** The site's Engineering Outcomes tab claims each result is verifiable in source. The suite holds it to that: no outcome row may cite zero projects, and following a citation must open the project tab it names, so a stale `data-target` cannot quietly send a reader to the wrong repository.
-- **Outbound Link-Rot Detection:** Every distinct off-site target the page advertises is resolved through the browser's own request context. Only `404`/`410` fail the check - `401`, `403`, `429` and a failed connection mean "not reachable by an anonymous, unthrottled caller", which is not evidence of rot and must not make the check flaky.
+- **Outbound Link-Rot Detection, Off the Deploy Path:** Every distinct off-site target the page advertises is resolved with `HEAD`, falling back to `GET` for anything that is not a clean success - `HEAD` support is not universal (LinkedIn answers `405` to it), so no build is failed on a `HEAD`-only answer. Only `404`/`410` count as rot: `401`, `403`, `429` and a failed connection mean "not reachable by an anonymous, unthrottled caller". Requests are paced **per host**, because the limit being respected is per host and a global delay would make every target wait on every other while protecting nothing - measured over this site's links, per-host scoping cut the batch from 12.8s to 9.5s. The check is marked `external` and runs weekly rather than per push, so a deploy signal never depends on a third party.
+- **Link Auditing Covers Hidden Panels:** Anchors are collected with a CSS locator rather than the `link` role. In a tabbed single-page application every inactive panel is `display: none`, which removes its contents from the accessibility tree - a role-based locator returned only the header and footer, so the link checks were inspecting 2 of 16 published targets while passing.
 - **Event-Driven CI/CD Execution:** Runs on GitHub Actions on a push that touches framework sources, on manual `workflow_dispatch`, and on a `website_updated` `repository_dispatch`. Runs are deduplicated by a concurrency group scoped to workflow, event, and ref, so an outdated in-flight run is cancelled rather than racing the latest one.
 - **Deployment-Aware Gating:** Before any browser launches, CI waits for the target's Pages deployment to settle: first until the site repository reports no queued or in-progress Actions run, then until the served `ETag` repeats across consecutive polls. An HTTP 200 is not proof of freshness - the previous build answers 200 just as happily - and testing a half-propagated CDN is how a passing locator times out mid-run.
 - **Dual Reporting Engines:** Rich interactive **Allure HTML** reports plus standalone **Pytest HTML** execution summaries.
@@ -27,7 +28,8 @@ Target Application: [https://apolskiy.github.io/](https://apolskiy.github.io/)
 PlaywrightAPWebsiteAutomation/
 ├── .github/
 │   └── workflows/
-│       └── ci.yml                 # Pages-deployment gate, Pylint gate, E2E job, Allure report
+│       ├── ci.yml                 # Pages-deployment gate, Pylint gate, E2E job, Allure report
+│       └── external-links.yml     # Weekly outbound link-rot check (`-m external`)
 ├── config/
 │   ├── __init__.py
 │   └── settings.py                # Environment loader, viewport and timeout constants
@@ -217,5 +219,7 @@ Verified clean afterwards on every tab at 320px, 390px, and 600px, on both Chrom
 | `test_dynamic_routes.py` | 5 × routes | Per discovered route: HTTP 200, console/network/JS error log, visible DOM root, desktop and mobile overflow |
 
 **53 tests** collected against the live site today (5 dynamic × 2 discovered routes), growing automatically as pages are published and as navigation tabs are added.
+
+The deployment pipeline runs `pytest -m "not external"` - **52 tests**, depending on nothing but this site. The remaining `external` test resolves outbound links and runs weekly via `external-links.yml`, or on demand with `pytest -m external`.
 
 `test_navigation.py` and `test_engineering_outcomes.py` both grow on their own: the first parameterizes over `NavigationTab`, so publishing a tab adds a case, and the second parameterizes over the projects a citation may open.

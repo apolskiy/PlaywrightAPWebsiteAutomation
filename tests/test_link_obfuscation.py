@@ -9,6 +9,7 @@ available, and the ``noscript`` fallback when it is not.
 from __future__ import annotations
 
 import allure
+import pytest
 from playwright.sync_api import expect
 
 from pages.landing_page import LandingPage
@@ -95,6 +96,7 @@ def test_decoded_links_use_absolute_safe_schemes(desktop_page: LandingPage) -> N
 @allure.feature("Outbound Link Integrity")
 @allure.story("Every published repository link still resolves")
 @allure.severity(allure.severity_level.NORMAL)
+@pytest.mark.external
 def test_outbound_links_do_not_rot(desktop_page: LandingPage) -> None:
     """Each off-site target the page advertises must still exist.
 
@@ -102,6 +104,12 @@ def test_outbound_links_do_not_rot(desktop_page: LandingPage) -> None:
     and the page keeps advertising it. This resolves every distinct outbound
     target and fails only on a definitive "gone" status, so a rate limit or a
     transient network fault cannot turn link-rot detection into a flaky test.
+
+    Marked ``external``: it is the one test here that depends on third parties
+    being reachable, so it is deselected on the deployment path and run on a
+    schedule instead. Link rot happens over months; checking it on every push
+    would put GitHub and Docker Hub in the critical path of a deploy signal and
+    generate enough request pressure to trip rate limiting on its own.
 
     Args:
         desktop_page: Landing Page Object at the 1920x1080 viewport.

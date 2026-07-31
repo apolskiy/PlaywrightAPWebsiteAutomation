@@ -118,7 +118,11 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
-          pytest
+          # `external` tests reach third-party hosts and are deselected here on
+          # purpose: a deploy signal must depend on this site alone, not on
+          # GitHub or Docker Hub being reachable from the runner. They run on a
+          # schedule instead - see external-links.yml.
+          pytest -m "not external"
 
       - name: Set up Java JDK
         if: always()
