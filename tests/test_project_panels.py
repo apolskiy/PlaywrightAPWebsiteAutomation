@@ -83,6 +83,59 @@ def test_project_panel_publishes_a_documentation_link(
 
 @allure.epic(EPIC_NAME)
 @allure.feature(FEATURE_NAME)
+@allure.story("Every project panel publishes a build-status badge")
+@allure.severity(allure.severity_level.NORMAL)
+@pytest.mark.parametrize("project_tab", PROJECT_TABS, ids=lambda tab: tab.name.lower())
+def test_project_panel_publishes_a_ci_status_badge(
+    desktop_page: LandingPage, project_tab: NavigationTab
+) -> None:
+    """A project panel must carry a CI badge sourced from its own repository.
+
+    The badge is the one element on the page that reports whether the project
+    currently works. A panel without one asks the reader to take the project's
+    health on trust, and a badge pointing at the wrong repository is worse
+    still: it reports a green that belongs to someone else.
+
+    The assertion deliberately inspects the ``src`` rather than waiting for the
+    image to render. Badge images are fetched from github.com, and a deploy
+    signal must not depend on that host being reachable from the runner.
+
+    Args:
+        desktop_page: Landing Page Object at the 1920x1080 viewport.
+        project_tab: The project panel under inspection.
+    """
+    landing_page = desktop_page.navigate()
+    landing_page.open_tab(project_tab)
+
+    badge = landing_page.ci_status_badge(project_tab)
+
+    with allure.step("Verify the CI row publishes exactly one badge"):
+        expect(badge).to_have_count(1)
+
+    with allure.step("Verify the badge is served from a GitHub Actions endpoint"):
+        source = badge.get_attribute("src") or ""
+        allure.attach(
+            source, name="Badge source", attachment_type=allure.attachment_type.TEXT
+        )
+        assert source.startswith("https://github.com/apolskiy/"), (
+            f"The {project_tab.label} badge is sourced from '{source}', which is "
+            "not one of this author's repositories."
+        )
+        assert "/badge.svg" in source, (
+            f"The {project_tab.label} badge source '{source}' is not a status "
+            "badge endpoint."
+        )
+
+    with allure.step("Verify the badge carries alternative text"):
+        alt_text = badge.get_attribute("alt") or ""
+        assert alt_text.strip(), (
+            f"The {project_tab.label} badge has no alt text, so its status is "
+            "invisible to a screen reader and to anyone whose images fail."
+        )
+
+
+@allure.epic(EPIC_NAME)
+@allure.feature(FEATURE_NAME)
 @allure.story("Documentation links open in a new tab without leaking the opener")
 @allure.severity(allure.severity_level.NORMAL)
 @pytest.mark.parametrize("project_tab", PROJECT_TABS, ids=lambda tab: tab.name.lower())

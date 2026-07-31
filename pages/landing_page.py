@@ -61,6 +61,9 @@ OUTCOMES_TABLE_LABEL: Final[str] = "Selected Engineering Outcomes"
 #: Label of the project-table row that links a project's own documentation.
 DOCUMENTATION_ROW_LABEL: Final[str] = "Documentation"
 
+#: Label of the project-table row carrying the build-status badge.
+CI_STATUS_ROW_LABEL: Final[str] = "CI / Build Status"
+
 #: Minimum gap between consecutive requests to the same host, in seconds.
 #: Resolving one host's links back-to-back is enough to trip its rate limiter.
 OUTBOUND_REQUEST_INTERVAL_SECONDS: Final[float] = 0.4
@@ -532,6 +535,25 @@ class LandingPage(BasePage):
             .filter(has_text=soft_text_pattern(DOCUMENTATION_ROW_LABEL))
         )
         return documentation_row.get_by_role("link")
+
+    def ci_status_badge(self, tab: NavigationTab) -> Locator:
+        """Locate the CI status badge published by a project panel.
+
+        The row is matched by its label rather than by position, so re-ordering
+        a project table cannot silently retarget this locator.
+
+        Args:
+            tab: The project tab whose build badge is wanted.
+
+        Returns:
+            A locator for the badge image inside the CI status row.
+        """
+        status_row = (
+            self.tab_panel(tab)
+            .get_by_role("row")
+            .filter(has_text=soft_text_pattern(CI_STATUS_ROW_LABEL))
+        )
+        return status_row.locator("img.ci-badge")
 
     def panel_link(self, tab: NavigationTab) -> Locator:
         """Locate the first decoded link inside a tab's content panel.
