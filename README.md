@@ -211,15 +211,15 @@ Verified clean afterwards on every tab at 320px, 390px, and 600px, on both Chrom
 | Suite | Scenarios | Focus |
 | --- | --- | --- |
 | `test_navigation.py` | 12 | Title, profile header, self-hosted portrait, footer, default tab, per-tab panel exclusivity (one case per tab), tab deselection, persistent chrome, skills matrix |
-| `test_engineering_outcomes.py` | 8 | Outcomes table renders, every claim cites a project, each citation opens the tab it names (one case per project), row-hover parity, keyboard activation |
+| `test_engineering_outcomes.py` | 9 | Outcomes table renders, every claim cites a project, each citation opens the tab it names (one case per project), emphasis rendering does not fracture a sentence, row-hover parity, keyboard activation |
 | `test_responsive.py` | 7 | Tab-strip wrapping, header suppression below the breakpoint, horizontal overflow on both viewports, stacked profile header |
 | `test_link_obfuscation.py` | 7 | Placeholder decoding, safe URL schemes, outbound link-rot detection, `noopener noreferrer` hardening, address never rendered as text, copyright owner link, `noscript` fallback |
 | `test_link_styling.py` | 1 | Copyright link shares the table hover color, and hovering visibly changes it |
 | `test_project_panels.py` | 12 | Per project panel: a Documentation row linking that project's README, decoded to an absolute target and opening in a hardened new tab; a CI badge sourced from that project's own repository and carrying alt text |
 | `test_dynamic_routes.py` | 5 × routes | Per discovered route: HTTP 200, console/network/JS error log, visible DOM root, desktop and mobile overflow |
 
-**57 tests** collected against the live site today (5 dynamic × 2 discovered routes), growing automatically as pages are published and as navigation tabs are added.
+**58 tests** collected against the live site today (5 dynamic × 2 discovered routes), growing automatically as pages are published and as navigation tabs are added.
 
-The deployment pipeline runs `pytest -m "not external"` - **56 tests**, depending on nothing but this site. The remaining `external` test resolves outbound links and runs weekly via `external-links.yml`, or on demand with `pytest -m external`.
+The deployment pipeline runs `pytest -m "not external"` - **57 tests**, depending on nothing but this site. The remaining `external` test resolves outbound links and runs weekly via `external-links.yml`, or on demand with `pytest -m external`.
 
 `test_navigation.py` and `test_engineering_outcomes.py` both grow on their own: the first parameterizes over `NavigationTab`, so publishing a tab adds a case, and the second parameterizes over the projects a citation may open.

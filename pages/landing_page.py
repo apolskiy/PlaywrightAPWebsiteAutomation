@@ -214,37 +214,32 @@ class LandingPage(BasePage):
     # Locators
     # ------------------------------------------------------------------
 
-    def follow_evidence_cross_reference(self, tab: NavigationTab) -> None:
-        """Click the Evidence control that opens a given project tab.
-
-        Args:
-            tab: The project tab the control names.
-
-        Returns:
-            None
-        """
-        with allure.step(f"Follow the Evidence cross-reference to '{tab.label}'"):
-            self.evidence_cross_reference_for(tab).click()
-
-    def activate_evidence_cross_reference_by_key(
-        self, tab: NavigationTab, key: str = "Enter"
+    def open_project_from_evidence(
+        self, tab: NavigationTab, *, key: str | None = None
     ) -> None:
-        """Focus an Evidence control and activate it from the keyboard.
+        """Open a cited project through its Evidence cross-reference.
 
-        The controls carry a button role, so a pointer must not be the only way
-        to operate them.
+        Pointer and keyboard are the same action reached two ways, so they are
+        one method rather than two: the controls carry a button role, and a
+        caller should not have to know which input a given test is exercising.
 
         Args:
             tab: The project tab the control names.
-            key: The key to press once the control holds focus.
+            key: When given, the control is focused and this key is pressed
+                instead of being clicked. ``"Enter"`` and ``" "`` are the keys a
+                button role is obliged to honour.
 
         Returns:
             None
         """
-        with allure.step(f"Activate the '{tab.label}' cross-reference with {key}"):
+        how = "click" if key is None else f"{key} key"
+        with allure.step(f"Open '{tab.label}' from its Evidence citation ({how})"):
             control = self.evidence_cross_reference_for(tab)
-            control.focus()
-            control.press(key)
+            if key is None:
+                control.click()
+            else:
+                control.focus()
+                control.press(key)
 
     def nav_bar(self) -> Locator:
         """Locate the navigation landmark holding the tab strip.
@@ -434,6 +429,27 @@ class LandingPage(BasePage):
             nothing.
         """
         return self.outcome_rows().nth(row_index).locator("span.tab-jump")
+
+    def outcome_emphasis_displays(self, row_index: int) -> list[str]:
+        """Read the computed ``display`` of each emphasis run in one outcome.
+
+        The prose cell opens with a bold claim that the stylesheet promotes to
+        its own line, and may then use emphasis mid-sentence. Those two need
+        different rendering, and the difference is only observable as a computed
+        style, so it is read here rather than asserted through a locator.
+
+        Args:
+            row_index: Zero-based index of the row within ``tbody``.
+
+        Returns:
+            One computed ``display`` value per ``<strong>``, in document order.
+        """
+        prose_cell = self.outcome_rows().nth(row_index).locator("td").first
+        return list(
+            prose_cell.locator("strong").evaluate_all(
+                "nodes => nodes.map(node => getComputedStyle(node).display)"
+            )
+        )
 
     def evidence_cross_reference_for(self, tab: NavigationTab) -> Locator:
         """Locate the first Evidence control that opens a given project tab.

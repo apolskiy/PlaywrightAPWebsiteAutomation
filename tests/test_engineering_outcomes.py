@@ -117,7 +117,7 @@ def test_evidence_cross_reference_opens_its_project_tab(
     landing_page.open_tab(NavigationTab.ENGINEERING_OUTCOMES)
 
     with allure.step(f"Follow the citation labelled '{cited_tab.label}'"):
-        landing_page.follow_evidence_cross_reference(cited_tab)
+        landing_page.open_project_from_evidence(cited_tab)
 
     with allure.step("Verify the cited project's panel is the only one shown"):
         landing_page.expect_only_panel_visible(cited_tab)
@@ -125,6 +125,60 @@ def test_evidence_cross_reference_opens_its_project_tab(
     with allure.step("Verify the navigation strip followed the jump"):
         landing_page.expect_tab_selected(cited_tab)
         landing_page.expect_tab_not_selected(NavigationTab.ENGINEERING_OUTCOMES)
+
+
+@allure.epic(EPIC_NAME)
+@allure.feature(FEATURE_NAME)
+@allure.story("Emphasis inside an outcome does not fracture its sentence")
+@allure.severity(allure.severity_level.NORMAL)
+def test_only_the_leading_claim_is_promoted_to_its_own_line(
+    desktop_page: LandingPage,
+) -> None:
+    """Only an outcome's opening claim may render as a block.
+
+    Each row opens with a bold claim that the stylesheet lifts onto its own
+    line, which is what makes the table scannable. Emphasis used later in the
+    same sentence must stay inline: promoting it to a block splits the sentence
+    around the emphasised words and leaves a stray fragment on the following
+    line.
+
+    This is a regression guard rather than a hypothetical. The rule was first
+    written against every ``<strong>`` in the cell, which was harmless until a
+    row emphasised a figure mid-prose, and the damage was visible only by
+    looking at the rendered page.
+
+    Args:
+        desktop_page: Landing Page Object at the 1920x1080 viewport.
+    """
+    landing_page = desktop_page.navigate()
+    landing_page.open_tab(NavigationTab.ENGINEERING_OUTCOMES)
+
+    row_count = landing_page.outcome_rows().count()
+    fractured: list[str] = []
+
+    with allure.step(f"Inspect emphasis rendering across {row_count} outcomes"):
+        for row_index in range(row_count):
+            displays = landing_page.outcome_emphasis_displays(row_index)
+            if not displays:
+                continue
+            if displays[0] != "block":
+                fractured.append(
+                    f"row {row_index}: leading claim renders as "
+                    f"'{displays[0]}', so the row has no headline"
+                )
+            inline_offenders = [
+                position
+                for position, display in enumerate(displays[1:], start=1)
+                if display == "block"
+            ]
+            if inline_offenders:
+                fractured.append(
+                    f"row {row_index}: mid-sentence emphasis at "
+                    f"{inline_offenders} renders as a block, splitting the prose"
+                )
+
+    with allure.step("Verify no outcome has its sentence broken by emphasis"):
+        assert not fractured, "Emphasis rendering is wrong:\n" + "\n".join(fractured)
 
 
 @allure.epic(EPIC_NAME)
@@ -188,8 +242,8 @@ def test_evidence_cross_reference_is_keyboard_operable(
     landing_page.open_tab(NavigationTab.ENGINEERING_OUTCOMES)
 
     with allure.step("Focus a citation and press Enter"):
-        landing_page.activate_evidence_cross_reference_by_key(
-            NavigationTab.WEB_AUTOMATION
+        landing_page.open_project_from_evidence(
+            NavigationTab.WEB_AUTOMATION, key="Enter"
         )
 
     with allure.step("Verify the cited project opened"):
