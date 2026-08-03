@@ -157,7 +157,7 @@ python -m pytest --use-cached-sitemap   # reuses reports/sitemap.json
 
 CI should re-crawl so a newly published page is discovered; the cache flag is a local-iteration convenience.
 
-> **Current scope:** the tab router uses `<li data-tab>` elements rather than anchors, so the index contributes a single route; the standalone case-study page is a genuine second document reached by an ordinary relative link. Discovery therefore yields **two** routes today, and the ten dynamic tests they generate are proof the engine works against real pages rather than only against a fixture. The engine was verified against a two-page fixture: adding a linked page generated five new test cases automatically, and adding a link to a non-existent page produced a failing `HTTP 404` check naming the parent route it was discovered from.
+> **Current scope:** the tab router uses `<li data-tab>` elements rather than anchors, so the index contributes a single route; the standalone case-study page is a genuine second document reached by an ordinary relative link. Discovery therefore yields **two** routes today and the ten dynamic tests they generate, which is the engine working against real pages rather than a fixture. Publishing the case-study page is what proved it: the route was discovered and five new cases appeared with no test edit. A deliberately broken link, tried during development, produced a failing `HTTP 404` check naming the parent route it was found from.
 
 ---
 
