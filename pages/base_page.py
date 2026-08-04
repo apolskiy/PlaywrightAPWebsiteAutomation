@@ -138,6 +138,28 @@ class BasePage:
         )
         return int(width), int(height)
 
+    def published_suite_counts(self) -> dict[str, int]:
+        """Read every suite-size figure the current page publishes to a reader.
+
+        The site quotes the size of this suite in prose, on more than one page.
+        Those figures are marked up rather than left as bare text so a test can
+        read exactly what a reader sees, which is what allows the claim to be
+        compared against the suite instead of maintained by hand.
+
+        Returns:
+            Mapping of scope name - ``total`` for the whole suite, ``deploy``
+            for the deployment path - to the integer the page displays. Scopes
+            the page does not mention are absent rather than zero.
+        """
+        return {
+            str(scope): int(text.strip())
+            for scope, text in self._page.eval_on_selector_all(
+                "span.suite-count",
+                "nodes => nodes.map(node => [node.dataset.scope, node.textContent])",
+            )
+            if scope and text.strip().isdigit()
+        }
+
     def has_horizontal_overflow(self) -> bool:
         """Detect whether the layout scrolls sideways at the current viewport.
 

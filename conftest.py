@@ -162,6 +162,84 @@ class DiagnosticsRegistry:
 DIAGNOSTICS_REGISTRY = DiagnosticsRegistry()
 
 
+@dataclass(frozen=True)
+class SuiteSize:
+    """How large the suite is, measured before any selection narrowed it.
+
+    Attributes:
+        total: Every test the suite collects.
+        deployment: Tests that run on the deployment path, meaning everything
+            not marked ``external``.
+        complete: Whether this run collected the whole suite. ``False`` when the
+            invocation named specific files or node ids, in which case the
+            counts describe that subset and must not be compared against a
+            figure the site publishes.
+    """
+
+    total: int
+    deployment: int
+    complete: bool
+
+
+class SuiteSizeRegistry:
+    """Carries the collected suite size from the collection hook to a fixture."""
+
+    def __init__(self) -> None:
+        self._size: SuiteSize | None = None
+
+    def record(self, size: SuiteSize) -> None:
+        """Store the measurement taken during collection.
+
+        Args:
+            size: The suite size observed before deselection.
+        """
+        self._size = size
+
+    def current(self) -> SuiteSize:
+        """Return the measurement taken during collection.
+
+        Returns:
+            The recorded :class:`SuiteSize`.
+
+        Raises:
+            RuntimeError: If read before collection has run.
+        """
+        if self._size is None:
+            raise RuntimeError("Suite size was read before collection completed.")
+        return self._size
+
+
+SUITE_SIZE_REGISTRY = SuiteSizeRegistry()
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    """Measure the suite before marker or keyword selection removes anything.
+
+    Registered ``tryfirst`` deliberately. Pytest applies ``-m`` and ``-k``
+    filtering inside this same hook, so an implementation running later would
+    measure one run's selection rather than the size of the suite, and the
+    figure published on the site would appear wrong whenever a subset was run.
+
+    Args:
+        config: The active pytest configuration.
+        items: Every collected item, before any deselection.
+    """
+    names_paths = any(
+        str(argument).endswith(".py") or "::" in str(argument)
+        for argument in config.invocation_params.args
+    )
+    SUITE_SIZE_REGISTRY.record(
+        SuiteSize(
+            total=len(items),
+            deployment=sum(
+                1 for item in items if item.get_closest_marker("external") is None
+            ),
+            complete=not names_paths,
+        )
+    )
+
+
 @pytest.fixture(name="framework_settings", scope="session")
 def fixture_framework_settings() -> Settings:
     """Resolve the framework configuration once per test session.
@@ -170,6 +248,16 @@ def fixture_framework_settings() -> Settings:
         The immutable settings snapshot shared by every fixture and hook.
     """
     return Settings.from_env()
+
+
+@pytest.fixture(name="suite_size", scope="session")
+def fixture_suite_size() -> SuiteSize:
+    """Expose the collected suite size to tests that check what the site claims.
+
+    Returns:
+        The measurement taken during collection.
+    """
+    return SUITE_SIZE_REGISTRY.current()
 
 
 @pytest.fixture(name="configure_assertion_timeout", scope="session", autouse=True)
