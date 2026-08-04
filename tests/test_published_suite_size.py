@@ -12,9 +12,11 @@ be read back and compared against the suite that is running, so the claim fails
 the build the moment it drifts instead of decaying quietly.
 
 The counts come from collection rather than from the current selection, so
-running a subset does not make the published figure look wrong. When an
-invocation names specific files, no comparison is possible and these checks skip
-rather than assert against a number that describes only part of the suite.
+running a subset does not make the published figure look wrong. Two invocations
+measure something other than the suite the site quotes - naming specific files,
+and selecting more than one browser engine, since every browser-scoped test is
+collected once per engine. Both skip rather than assert against a number that
+was never describing that run.
 """
 
 from __future__ import annotations
@@ -32,12 +34,6 @@ FEATURE_NAME = "Published Suite Size"
 
 #: Route of the case study, which quotes the same figures as the landing page.
 CASE_STUDY_ROUTE = "case-study.html"
-
-#: Skip reason used when the run collected only part of the suite.
-PARTIAL_RUN_REASON = (
-    "This run named specific test files, so the collected counts describe a "
-    "subset and cannot be compared with a figure published for the whole suite."
-)
 
 
 def _assert_matches(published: dict[str, int], suite_size: SuiteSize, page_name: str) -> None:
@@ -83,8 +79,8 @@ def test_landing_page_publishes_the_actual_suite_size(
         desktop_page: Landing Page Object at the 1920x1080 viewport.
         suite_size: Suite size measured during collection.
     """
-    if not suite_size.complete:
-        pytest.skip(PARTIAL_RUN_REASON)
+    if suite_size.incomparable_reason is not None:
+        pytest.skip(suite_size.incomparable_reason)
 
     landing_page = desktop_page.navigate()
 
@@ -110,8 +106,8 @@ def test_case_study_publishes_the_actual_suite_size(
         framework_settings: Resolved framework configuration.
         suite_size: Suite size measured during collection.
     """
-    if not suite_size.complete:
-        pytest.skip(PARTIAL_RUN_REASON)
+    if suite_size.incomparable_reason is not None:
+        pytest.skip(suite_size.incomparable_reason)
 
     with allure.step(f"Open /{CASE_STUDY_ROUTE}"):
         desktop_route_page.open(framework_settings.resolve_url(CASE_STUDY_ROUTE))

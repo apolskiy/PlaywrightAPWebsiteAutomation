@@ -162,6 +162,20 @@ class DiagnosticsRegistry:
 DIAGNOSTICS_REGISTRY = DiagnosticsRegistry()
 
 
+#: Explains why a run's collected size cannot be held against a published
+#: figure, when that is the case.
+PARTIAL_COLLECTION_REASON: Final[str] = (
+    "This run named specific test files or node ids, so the collected counts "
+    "describe a subset and cannot be compared with a figure published for the "
+    "whole suite."
+)
+MULTI_ENGINE_REASON: Final[str] = (
+    "This run selected more than one browser engine, so every browser-scoped "
+    "test is collected once per engine and the totals describe a multi-engine "
+    "run rather than the single-engine suite the site quotes."
+)
+
+
 @dataclass(frozen=True)
 class SuiteSize:
     """How large the suite is, measured before any selection narrowed it.
@@ -170,15 +184,13 @@ class SuiteSize:
         total: Every test the suite collects.
         deployment: Tests that run on the deployment path, meaning everything
             not marked ``external``.
-        complete: Whether this run collected the whole suite. ``False`` when the
-            invocation named specific files or node ids, in which case the
-            counts describe that subset and must not be compared against a
-            figure the site publishes.
+        incomparable_reason: Why these counts must not be compared against a
+            figure the site publishes, or ``None`` when the comparison is valid.
     """
 
     total: int
     deployment: int
-    complete: bool
+    incomparable_reason: str | None
 
 
 class SuiteSizeRegistry:
@@ -229,13 +241,25 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
         str(argument).endswith(".py") or "::" in str(argument)
         for argument in config.invocation_params.args
     )
+    # `--browser` is repeatable, and every browser-scoped test is collected once
+    # per engine. A two-engine run therefore collects roughly twice the suite,
+    # which is a different measurement rather than a drifted one.
+    selected_engines = config.getoption("browser", default=None) or []
+
+    if names_paths:
+        reason: str | None = PARTIAL_COLLECTION_REASON
+    elif len(selected_engines) > 1:
+        reason = MULTI_ENGINE_REASON
+    else:
+        reason = None
+
     SUITE_SIZE_REGISTRY.record(
         SuiteSize(
             total=len(items),
             deployment=sum(
                 1 for item in items if item.get_closest_marker("external") is None
             ),
-            complete=not names_paths,
+            incomparable_reason=reason,
         )
     )
 
