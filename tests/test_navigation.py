@@ -11,7 +11,7 @@ import allure
 import pytest
 from playwright.sync_api import expect
 
-from pages.landing_page import LandingPage, NavigationTab
+from pages.landing_page import PROFILE_NAME, LandingPage, NavigationTab
 
 EPIC_NAME = "Portfolio Website Quality"
 FEATURE_NAME = "Navigation and SPA Routing"
@@ -29,8 +29,13 @@ def test_landing_page_exposes_owner_identity(desktop_page: LandingPage) -> None:
     """
     landing_page = desktop_page.navigate()
 
-    with allure.step("Verify the document title advertises the technology stack"):
-        landing_page.expect_title_contains("Playwright")
+    # The title is asserted on the owner's name rather than on a technology.
+    # It previously required "Playwright", which tied the single most important
+    # SEO element on the page to one library in a list that will keep changing -
+    # and the title is what a search result and a browser tab actually show. The
+    # person the portfolio belongs to is the part that has to be there.
+    with allure.step("Verify the document title identifies the site owner"):
+        landing_page.expect_title_contains(PROFILE_NAME)
 
     with allure.step("Verify the permanent profile header is rendered"):
         expect(landing_page.profile_photo()).to_be_visible()

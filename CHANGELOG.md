@@ -23,6 +23,22 @@ in the evening in one timezone still agrees with the commit that carries it.
 
 ---
 
+## v1.1.0 - 2026-08-10
+
+### Changed
+
+- **The document-title check asserts the owner's name instead of a library.**
+  It required the title to contain "Playwright", which pinned the site's single
+  most visible piece of text - browser tab, bookmark, search result - to one
+  entry in a technology list that will keep changing. When the title was
+  rewritten to name the person rather than the file types, this check failed,
+  which is the check doing its job; but what it was protecting was the wrong
+  invariant. It now asserts `PROFILE_NAME`, the same constant the portrait and
+  heading assertions already use, so the title, the portrait and the heading
+  agree on one source for who the site belongs to.
+
+---
+
 ## v1.0.0 - 2026-08-10
 
 First release under version tracking. The framework predates this file;
