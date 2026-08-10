@@ -32,7 +32,7 @@ def test_desktop_navigation_renders_on_a_single_row(desktop_page: LandingPage) -
     with allure.step("Verify the navigation landmark is displayed"):
         expect(landing_page.nav_bar()).to_be_visible()
 
-    with allure.step("Verify all five tabs share one horizontal row"):
+    with allure.step("Verify every tab shares one horizontal row"):
         assert landing_page.navigation_row_count() == 1, (
             "The desktop tab strip wrapped onto more than one row, which means "
             "the shrink-to-fit menu width regressed."

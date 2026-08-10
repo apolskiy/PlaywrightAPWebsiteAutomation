@@ -45,6 +45,16 @@ min-public-methods = 1
 # classes and make the tests harder to read.
 # Raised from 40 when the Engineering Outcomes tab was added: its table, rows,
 # and Evidence cross-references contribute locators and two activation helpers.
+#
+# It went to 55 when the project panels gained a repository-agreement check, and
+# was then put back. That would have been the second raise, and the ceiling was
+# doing its job: the class had grown a part that was not page interaction at
+# all. The outbound-link auditor - collecting anchors, separating outbound
+# targets from internal ones, and resolving each against its host with per-host
+# pacing - issues real HTTP requests and merely borrowed the browser's request
+# context to do it. It now lives in `utils/link_auditor.py`, which took six
+# public methods off this class (51 -> 45) instead of adding five to the limit.
+# Prefer that move again over another raise.
 max-public-methods = 50
 
 [TYPECHECK]

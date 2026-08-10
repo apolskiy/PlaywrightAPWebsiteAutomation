@@ -62,7 +62,7 @@ def test_all_placeholders_are_decoded_into_anchors(desktop_page: LandingPage) ->
         expect(landing_page.link_placeholders()).to_have_count(0)
 
     with allure.step("Verify the decoder produced navigable anchors"):
-        expect(landing_page.content_links().first).to_be_visible()
+        expect(landing_page.links.anchors().first).to_be_visible()
 
 
 @allure.epic(EPIC_NAME)
@@ -77,7 +77,7 @@ def test_decoded_links_use_absolute_safe_schemes(desktop_page: LandingPage) -> N
     """
     landing_page = desktop_page.navigate()
 
-    decoded_hrefs = landing_page.decoded_link_hrefs()
+    decoded_hrefs = landing_page.links.published_hrefs()
 
     with allure.step(f"Inspect the {len(decoded_hrefs)} decoded anchors"):
         allure.attach(
@@ -116,10 +116,10 @@ def test_outbound_links_do_not_rot(desktop_page: LandingPage) -> None:
     """
     landing_page = desktop_page.navigate()
 
-    targets = landing_page.outbound_link_targets()
+    targets = landing_page.links.outbound_targets()
 
     with allure.step(f"Resolve {len(targets)} distinct outbound targets"):
-        statuses = {target: landing_page.url_status(target) for target in targets}
+        statuses = {target: landing_page.links.url_status(target) for target in targets}
         allure.attach(
             "\n".join(f"{status}  {target}" for target, status in statuses.items()),
             name="Outbound link statuses",
@@ -159,13 +159,13 @@ def test_new_tab_links_declare_noopener_and_noreferrer(desktop_page: LandingPage
     landing_page = desktop_page.navigate()
 
     with allure.step("Verify the decoder opted some links into a new tab"):
-        assert landing_page.new_tab_link_count() > 0, (
+        assert landing_page.links.new_tab_count() > 0, (
             "No anchor was decoded with target='_blank', so the data-nw opt-in "
             "is no longer being honoured."
         )
 
     with allure.step("Verify no new-tab link is missing its rel hardening"):
-        assert landing_page.unsafe_new_tab_link_count() == 0, (
+        assert landing_page.links.unhardened_new_tab_count() == 0, (
             "At least one target='_blank' anchor is missing rel='noopener "
             "noreferrer', which exposes the site to reverse tabnabbing."
         )

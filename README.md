@@ -4,18 +4,27 @@ A production-grade E2E web automation and dynamic route-discovery framework buil
 
 Target Application: [https://apolskiy.github.io/](https://apolskiy.github.io/)
 
+> **Documentation status:** describes **v1.0.0**, reviewed 2026-08-10.
+> Each section below carries the release and date its content last changed, so a
+> reader arriving at a later version can see at a glance which parts moved. This
+> file always describes the *current* state; release-to-release history lives in
+> [CHANGELOG.md](CHANGELOG.md).
+
 ---
 
 ## Key Features
+
+<sub>v1.0.0 &middot; 2026-08-10</sub>
 
 - **Page Object Model (POM):** Clean separation of UI locators, interaction workflows, and assertion logic. Test modules contain zero raw selectors and never touch a Playwright `Page` directly.
 - **Dynamic Site Discovery:** An async Playwright crawler maps the site's route graph at collection time and writes `reports/sitemap.json`. Every discovered route is then parameterized into its own health-check tests, so publishing a new page grows the suite with no test edit.
 - **Cross-Viewport Coverage:** Every layout rule is asserted on both sides of the site's `max-width: 600px` breakpoint: desktop (1920x1080) and mobile (390x844).
 - **Evidence-Integrity Checks:** The site's Engineering Outcomes tab claims each result is verifiable in source. The suite holds it to that: no outcome row may cite zero projects, and following a citation must open the project tab it names, so a stale `data-target` cannot quietly send a reader to the wrong repository.
+- **Panels Checked Against Themselves, Not Just Against a Pattern:** Every project panel must carry a documentation link and a build badge, and each is asserted individually - which passes on a panel that is quietly describing two different projects. The badge check can only require a source under the author's account, and that is true of every repository he owns, so a panel begun by copying a sibling keeps the sibling's badge and stays green while reporting a build result that belongs to somewhere else, on the one row whose whole purpose is to say whether *this* project works. Nothing about it is visible from the rendered page. It is caught by reducing the repository row, the badge source and the README target to the `owner/name` each belongs to and requiring the three to agree.
 - **Outbound Link-Rot Detection, Off the Deploy Path:** Every distinct off-site target the page advertises is resolved with `HEAD`, falling back to `GET` for anything that is not a clean success - `HEAD` support is not universal (LinkedIn answers `405` to it), so no build is failed on a `HEAD`-only answer. Only `404`/`410` count as rot: `401`, `403`, `429` and a failed connection mean "not reachable by an anonymous, unthrottled caller". Requests are paced **per host**, because the limit being respected is per host and a global delay would make every target wait on every other while protecting nothing - measured over this site's links, per-host scoping cut the batch from 12.8s to 9.5s. The check is marked `external` and runs weekly rather than per push, so a deploy signal never depends on a third party.
 - **Published Figures Verify Themselves:** The site quotes this suite's size in prose, in two places. A hand-maintained number is a number that eventually stops being true - a test is added, the pipeline still passes, and the page keeps advertising last month's figure. The figures stay written in the markup, because a reader should see a number rather than a placeholder, but they are read back and compared against the running suite, so drift fails the build instead of decaying quietly. Counts are taken during collection with a `tryfirst` hook, ahead of the `-m` and `-k` filtering pytest applies in that same hook, so running a subset never makes the published figure look wrong. Two invocations measure something the figure was never describing - naming specific files, and selecting several browser engines - and both skip rather than report drift that is not there.
 - **Published Artefact Verification, Off the Deploy Path:** The HTTP Emulators tab claims the `apolskiy/flask_app` image carries Flask and its six transitive dependencies and nothing else. That claim is checked against the image itself: an anonymous pull token, the platform manifest, then the layer blobs, reading the installed `*.dist-info` metadata to assert the closure is exactly what the page advertises. Base packaging tooling is subtracted rather than pretended away. No container runtime is involved - a test needing Docker could not share a runner with the browser suite - and no HTTP client was added, since the standard library already resolves a registry. Marked `external` for the same reason link-rot is: a dependency regression in a published image is a monthly risk, not a per-push one.
-- **Link Auditing Covers Hidden Panels:** Anchors are collected with a CSS locator rather than the `link` role. In a tabbed single-page application every inactive panel is `display: none`, which removes its contents from the accessibility tree - a role-based locator returned only the header and footer, so the link checks were inspecting 2 of 16 published targets while passing.
+- **Link Auditing Covers Hidden Panels:** Anchors are collected with a CSS locator rather than the `link` role. In a tabbed single-page application every inactive panel is `display: none`, which removes its contents from the accessibility tree - a role-based locator returned only the header and footer, so the link checks were inspecting 2 of 16 published targets while passing. This lives in `utils/link_auditor.py` rather than on the Page Object: it issues real HTTP requests to third parties and keeps per-host timing state, which is a different responsibility from driving the document in front of the browser.
 - **Event-Driven CI/CD Execution:** Runs on GitHub Actions on a push that touches framework sources, on manual `workflow_dispatch`, and on a `website_updated` `repository_dispatch`. Runs are deduplicated by a concurrency group scoped to workflow, event, and ref, so an outdated in-flight run is cancelled rather than racing the latest one.
 - **Deployment-Aware Gating:** Before any browser launches, CI waits for the target's Pages deployment to settle: first until the site repository reports no queued or in-progress Actions run, then until the served `ETag` repeats across consecutive polls. An HTTP 200 is not proof of freshness - the previous build answers 200 just as happily - and testing a half-propagated CDN is how a passing locator times out mid-run.
 - **Dual Reporting Engines:** Rich interactive **Allure HTML** reports plus standalone **Pytest HTML** execution summaries.
@@ -25,6 +34,8 @@ Target Application: [https://apolskiy.github.io/](https://apolskiy.github.io/)
 ---
 
 ## Project Architecture
+
+<sub>v1.0.0 &middot; 2026-08-10</sub>
 
 ```text
 PlaywrightAPWebsiteAutomation/
@@ -43,6 +54,7 @@ PlaywrightAPWebsiteAutomation/
 ├── utils/
 │   ├── __init__.py
 │   ├── claude_inspector.py        # Claude API failure triage helper
+│   ├── link_auditor.py            # Outbound link collection, classification, and resolution
 │   ├── registry_client.py         # Stdlib Docker registry reader for published-image audits
 │   ├── site_crawler.py            # Async sitemap crawler and route discovery engine
 │   └── visual_comparator.py       # Pillow threshold image-diff helper (available; no test uses it yet)
@@ -53,23 +65,28 @@ PlaywrightAPWebsiteAutomation/
 │   ├── test_link_obfuscation.py   # Base64 anti-scraping link and e-mail decoding
 │   ├── test_link_styling.py       # Shared interactive link hover styling
 │   ├── test_engineering_outcomes.py  # Outcomes table and its cross-tab citations
-│   ├── test_project_panels.py     # Per-project panel completeness (documentation row)
+│   ├── test_project_panels.py     # Per-project panel completeness and repository agreement
 │   ├── test_published_image_claims.py  # Published container matches the claim on the page
 │   ├── test_published_suite_size.py    # Suite-size figures on the site match the real suite
 │   └── test_dynamic_routes.py     # Health checks generated per discovered route
-├── conftest.py                    # Viewport fixtures + AI failure-diagnostics hook
+├── conftest.py                    # Viewport fixtures, suite-size registry, AI diagnostics hook
 ├── .env.example                   # Template for local configuration
 ├── .gitignore
 ├── .pylintrc                      # Static analysis configuration
 ├── pytest.ini                     # Pytest, Allure, & browser runtime flags
+├── CHANGELOG.md                   # Release-to-release history; this file holds only the present
 ├── LICENSE
 ├── README.md
 └── requirements.txt
 ```
 
+`NavigationTab` in `pages/landing_page.py` is the single place a newly published tab is declared, and three suites parameterize over it rather than over a list of their own: `test_navigation.py` takes one case per tab, `test_project_panels.py` four per *project* tab, and `test_engineering_outcomes.py` one per project tab. Adding the VM Cluster Deployment tab therefore contributed **five** cases with no edit to any test module. (`test_responsive.py` iterates the same enum *inside* two tests, so its coverage grows with a new tab while its case count does not.)
+
 ---
 
 ## Quick Start
+
+<sub>v1.0.0 &middot; 2026-08-10</sub>
 
 Requires **Python 3.10+** - the highest floor declared by any pinned dependency. Developed, verified, and CI-pinned on **3.14**.
 
@@ -103,6 +120,8 @@ Selecting more than one engine collects every browser-scoped test once per engin
 
 ## Configuration
 
+<sub>v1.0.0 &middot; 2026-08-10</sub>
+
 All configuration is read once, at session start, by `config.settings.Settings`. Test modules never read `os.environ`.
 
 | Variable | Default | Purpose |
@@ -119,6 +138,8 @@ Diagnostics activate only when `AI_DIAGNOSTICS_ENABLED` is truthy **and** a key 
 
 ## Test Design Principles
 
+<sub>v1.0.0 &middot; 2026-08-10</sub>
+
 **Locators.** Accessible locators (`get_by_role`, `get_by_text`) are used wherever the markup exposes a role or an accessible name. The application ships no `data-testid` attributes, so the tab panels - plain `<div>` elements carrying only an `id` - are addressed by a flat `#id` selector. Structural chains such as `div > ul > li:nth-child(2)` are never used.
 
 **Synchronization.** There are no `wait_for_timeout` calls anywhere in the suite. The page decorates itself from a `DOMContentLoaded` listener, and readiness is expressed as an exact web-first assertion: the suite waits for the `span.enc-link` placeholder collection to drain to zero. Layout measurements settle the DOM with a visibility assertion before reading any bounding box.
@@ -130,6 +151,8 @@ Diagnostics activate only when `AI_DIAGNOSTICS_ENABLED` is truthy **and** a key 
 ---
 
 ## Dynamic Site Discovery
+
+<sub>v1.0.0 &middot; 2026-08-10</sub>
 
 `utils/site_crawler.py` implements `SiteMapCrawler`, an asynchronous breadth-first Playwright crawler.
 
@@ -174,6 +197,8 @@ CI should re-crawl so a newly published page is discovered; the cache flag is a 
 
 ## Reporting
 
+<sub>v1.0.0 &middot; 2026-08-10</sub>
+
 ```bash
 python -m pytest                       # writes allure-results/ and reports/
 allure serve allure-results            # interactive Allure report
@@ -194,6 +219,8 @@ The diagnostics hook is strictly advisory. A missing credential, a network failu
 
 ## Static Analysis
 
+<sub>v1.0.0 &middot; 2026-08-10</sub>
+
 ```bash
 python -m pylint config pages utils tests conftest.py
 ```
@@ -203,6 +230,8 @@ The suite is held at **10.00/10**, and CI runs the same command with `--fail-und
 ---
 
 ## Defect Found and Fixed
+
+<sub>v1.0.0 &middot; 2026-08-10</sub>
 
 `test_mobile_layout_has_no_horizontal_overflow` caught a real mobile layout bug on its first run: at a 390px viewport the document measured **398px**, and one tab reached **400px**. Two independent causes in the `max-width: 600px` block of `css/apolskiybiz.css`:
 
@@ -219,20 +248,22 @@ Verified clean afterwards on every tab at 320px, 390px, and 600px, on both Chrom
 
 ## Coverage Summary
 
+<sub>v1.0.0 &middot; 2026-08-10</sub>
+
 | Suite | Scenarios | Focus |
 | --- | --- | --- |
-| `test_navigation.py` | 12 | Title, profile header, self-hosted portrait, footer, default tab, per-tab panel exclusivity (one case per tab), tab deselection, persistent chrome, skills matrix |
-| `test_engineering_outcomes.py` | 9 | Outcomes table renders, every claim cites a project, each citation opens the tab it names (one case per project), emphasis rendering does not fracture a sentence, row-hover parity, keyboard activation |
-| `test_responsive.py` | 7 | Tab-strip wrapping, header suppression below the breakpoint, horizontal overflow on both viewports, stacked profile header |
+| `test_navigation.py` | 13 | Title, profile header, self-hosted portrait, footer, default tab, per-tab panel exclusivity (one case per tab), tab deselection, persistent chrome, skills matrix |
+| `test_engineering_outcomes.py` | 10 | Outcomes table renders, every claim cites a project, each citation opens the tab it names (one case per project), emphasis rendering does not fracture a sentence, row-hover parity, keyboard activation |
+| `test_responsive.py` | 7 | Tab-strip wrapping, header suppression below the breakpoint, horizontal overflow on both viewports (every tab checked inside each case), stacked profile header |
 | `test_link_obfuscation.py` | 7 | Placeholder decoding, safe URL schemes, outbound link-rot detection, `noopener noreferrer` hardening, address never rendered as text, copyright owner link, `noscript` fallback |
 | `test_link_styling.py` | 1 | Copyright link shares the table hover color, and hovering visibly changes it |
-| `test_project_panels.py` | 12 | Per project panel: a Documentation row linking that project's README, decoded to an absolute target and opening in a hardened new tab; a CI badge sourced from that project's own repository and carrying alt text |
+| `test_project_panels.py` | 20 | Per project panel: a Documentation row linking that project's README, decoded to an absolute target and opening in a hardened new tab; a CI badge sourced from that project's own repository and carrying alt text; and the repository row, badge source and README target all reduced to `owner/name` and required to agree |
 | `test_published_image_claims.py` | 1 | The published `apolskiy/flask_app` image installs Flask's dependency closure and nothing beyond it |
 | `test_published_suite_size.py` | 2 | The suite-size figures quoted on the Web Automation tab and in the CI case study match the suite that is running |
 | `test_dynamic_routes.py` | 5 × routes | Per discovered route: HTTP 200, console/network/JS error log, visible DOM root, desktop and mobile overflow |
 
-**61 tests** collected against the live site today (5 dynamic × 2 discovered routes), growing automatically as pages are published and as navigation tabs are added.
+**71 tests** collected against the live site today (5 dynamic × 2 discovered routes), growing automatically as pages are published and as navigation tabs are added.
 
-The deployment pipeline runs `pytest -m "not external"` - **59 tests**, depending on nothing but this site. The two `external` tests reach third parties - one resolves outbound links, the other reads the published container image - and run weekly via `external-links.yml`, or on demand with `pytest -m external`.
+The deployment pipeline runs `pytest -m "not external"` - **69 tests**, depending on nothing but this site. The two `external` tests reach third parties - one resolves outbound links, the other reads the published container image - and run weekly via `external-links.yml`, or on demand with `pytest -m external`.
 
-`test_navigation.py` and `test_engineering_outcomes.py` both grow on their own: the first parameterizes over `NavigationTab`, so publishing a tab adds a case, and the second parameterizes over the projects a citation may open.
+Three suites grow on their own, all from the same declaration. `test_navigation.py` parameterizes over `NavigationTab`, so publishing any tab adds a case; `test_project_panels.py` and `test_engineering_outcomes.py` parameterize over the subset of those tabs that describe a project, contributing four cases and one respectively. The counts above already include the VM Cluster Deployment tab, which added five of them without a test edit.

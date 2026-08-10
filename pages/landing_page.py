@@ -17,20 +17,31 @@ class toggled by the SPA router, the ``mailto:`` payload produced by the
 anti-scraping decoder - are published here as ``expect_*`` helpers built on
 Playwright's auto-retrying assertions. Everything else is exposed as a
 :class:`~playwright.sync_api.Locator` so tests can assert on it directly.
+
+Scope
+-----
+This class describes the document in front of the browser and nothing else.
+Auditing the links the page publishes - collecting them, telling an outbound
+target from an internal one, and resolving each against its host - lives in
+:class:`~utils.link_auditor.LinkAuditor`, reached through the ``links``
+attribute. That work issues real HTTP requests to third parties and keeps
+per-host timing state, which is a different responsibility with a different set
+of failure modes, and folding it in here was what pushed this class past the
+point where its size was telling the truth about what it does.
 """
 
 from __future__ import annotations
 
 import re
-import time
 from enum import Enum
 from typing import Final
 from urllib.parse import urlparse
 
 import allure
-from playwright.sync_api import Error as PlaywrightError, Locator, Page, expect
+from playwright.sync_api import Locator, Page, expect
 
 from pages.base_page import BasePage
+from utils.link_auditor import LinkAuditor
 
 #: Matches the ``active`` token inside a space-separated ``class`` attribute
 #: without matching substrings such as ``inactive``.
@@ -61,12 +72,14 @@ OUTCOMES_TABLE_LABEL: Final[str] = "Selected Engineering Outcomes"
 #: Label of the project-table row that links a project's own documentation.
 DOCUMENTATION_ROW_LABEL: Final[str] = "Documentation"
 
+#: Label of the project-table row naming the repository the panel describes.
+REPOSITORY_ROW_LABEL: Final[str] = "Repo"
+
+#: Host serving every repository, badge and README target the panels cite.
+GITHUB_HOST: Final[str] = "github.com"
+
 #: Label of the project-table row carrying the build-status badge.
 CI_STATUS_ROW_LABEL: Final[str] = "CI / Build Status"
-
-#: Minimum gap between consecutive requests to the same host, in seconds.
-#: Resolving one host's links back-to-back is enough to trip its rate limiter.
-OUTBOUND_REQUEST_INTERVAL_SECONDS: Final[float] = 0.4
 
 
 def soft_text_pattern(text: str) -> re.Pattern[str]:
@@ -92,8 +105,35 @@ def soft_text_pattern(text: str) -> re.Pattern[str]:
     return re.compile(rf"\b{spaced_words}\b", re.IGNORECASE)
 
 
+def github_repository(url: str) -> str:
+    """Reduce a GitHub URL to the ``owner/name`` repository it belongs to.
+
+    Every reference a project panel publishes - the repository itself, the build
+    badge, the README - is some path underneath one repository, so they only
+    become comparable once the trailing path is discarded.
+
+    Comparison is deliberately case-insensitive: GitHub resolves owner and
+    repository names that way, so a difference in case is a cosmetic
+    inconsistency rather than a panel pointing at something else.
+
+    Args:
+        url: An absolute URL, which need not be a GitHub one.
+
+    Returns:
+        The lower-cased ``owner/name`` pair, or an empty string when the URL is
+        not served by GitHub or names no repository.
+    """
+    parsed = urlparse(url)
+    if parsed.netloc.lower() != GITHUB_HOST:
+        return ""
+    segments = [segment for segment in parsed.path.split("/") if segment]
+    if len(segments) < 2:
+        return ""
+    return "/".join(segments[:2]).lower()
+
+
 class NavigationTab(Enum):
-    """The six tabs published by the portfolio's vanilla-JS SPA router.
+    """Every tab published by the portfolio's vanilla-JS SPA router.
 
     Each member carries the tab's visible label, the ``id`` of the content panel
     the router reveals, and the heading rendered at the top of that panel. Home
@@ -103,6 +143,10 @@ class NavigationTab(Enum):
 
     Declaration order matches the order the tabs appear in the navigation strip,
     so a parametrized test reads in the same order a visitor encounters them.
+    The panel ids carry the ordinal they were added in rather than their
+    position, so they do not renumber when a tab is inserted; publishing a tab
+    means adding a member here, and the suites that parametrize over this enum
+    grow to cover it without a test edit.
     """
 
     HOME = ("Home", "aphome1", "Technical Skills Matrix")
@@ -115,6 +159,11 @@ class NavigationTab(Enum):
     PORTFOLIO_WEBSITE = ("Portfolio Website", "apwebsite3", "Portfolio Website")
     WEB_AUTOMATION = ("Web Automation", "apwebtest4", "Web Automation")
     HTTP_EMULATORS = ("HTTP Emulators", "aphttpemulators5", "HTTP Emulators")
+    VM_CLUSTER = (
+        "VM Cluster Deployment",
+        "apvmcluster7",
+        "VM Cluster Deployment",
+    )
 
     @property
     def label(self) -> str:
@@ -156,7 +205,11 @@ class LandingPage(BasePage):
     def __init__(self, page: Page, base_url: str) -> None:
         super().__init__(page)
         self._base_url = base_url
-        self._last_request_at_host: dict[str, float] = {}
+        #: Auditor for the links this page publishes. Held as a collaborator
+        #: rather than folded in as more methods: resolving outbound targets
+        #: issues real HTTP requests to third parties, which is a different
+        #: responsibility from driving the document in front of the browser.
+        self.links = LinkAuditor(page, base_url)
 
     # ------------------------------------------------------------------
     # Navigation
@@ -266,7 +319,7 @@ class LandingPage(BasePage):
         """Locate every navigation tab at once.
 
         Returns:
-            A locator resolving to all five list items in the tab strip.
+            A locator resolving to every list item in the tab strip.
         """
         return self.nav_bar().get_by_role("listitem")
 
@@ -552,6 +605,22 @@ class LandingPage(BasePage):
         )
         return documentation_row.get_by_role("link")
 
+    def repository_link(self, tab: NavigationTab) -> Locator:
+        """Locate the repository link published by a project panel.
+
+        Args:
+            tab: The project tab whose repository link is wanted.
+
+        Returns:
+            A locator for the anchor inside the ``Repo`` row.
+        """
+        repository_row = (
+            self.tab_panel(tab)
+            .get_by_role("row")
+            .filter(has_text=soft_text_pattern(REPOSITORY_ROW_LABEL))
+        )
+        return repository_row.get_by_role("link")
+
     def ci_status_badge(self, tab: NavigationTab) -> Locator:
         """Locate the CI status badge published by a project panel.
 
@@ -607,149 +676,9 @@ class LandingPage(BasePage):
         """
         return self.page.locator("span.enc-link")
 
-    def content_links(self) -> Locator:
-        """Locate every anchor in the document, including hidden panels.
-
-        A CSS locator is used here rather than the ``link`` role, and that is
-        deliberate. This is a tabbed single-page application: every panel except
-        the active one is ``display: none``, which removes its contents from the
-        accessibility tree, so a role-based locator returns only the anchors of
-        whichever tab happens to be open - on first load, the profile header and
-        the footer alone.
-
-        Link auditing has to cover what the document publishes, not what is
-        currently painted, or the project links are never inspected at all.
-
-        Returns:
-            A locator resolving to every anchor in the document.
-        """
-        return self.page.locator("a")
-
     # ------------------------------------------------------------------
     # State queries
     # ------------------------------------------------------------------
-
-    def decoded_link_hrefs(self) -> list[str]:
-        """Collect the ``href`` of every anchor on the page.
-
-        Returns:
-            One entry per anchor, in document order. Anchors without an ``href``
-            contribute an empty string so the caller can flag them.
-        """
-        anchors = self.content_links()
-        return [
-            anchors.nth(anchor_index).get_attribute("href") or ""
-            for anchor_index in range(anchors.count())
-        ]
-
-    def outbound_link_targets(self) -> list[str]:
-        """Collect the distinct off-site ``https`` targets published by the page.
-
-        Returns:
-            Unique absolute targets whose host differs from the application's
-            own, in first-seen order. Internal page links and ``mailto:`` are
-            excluded: neither can rot in a way an HTTP status would reveal.
-        """
-        own_host = urlparse(self._base_url).netloc
-        seen: dict[str, None] = {}
-        for href in self.decoded_link_hrefs():
-            if not href.startswith("https://"):
-                continue
-            if urlparse(href).netloc == own_host:
-                continue
-            seen.setdefault(href, None)
-        return list(seen)
-
-    def _issue_request(self, url: str, method: str) -> int:
-        """Issue one request through the browser's own request context.
-
-        Using the browser's context rather than a separate HTTP client keeps the
-        dependency list unchanged and inherits the browser's redirect handling.
-
-        Args:
-            url: An absolute URL.
-            method: ``"head"`` or ``"get"``.
-
-        Returns:
-            The final status code, or ``0`` when the request could not be
-            completed at all - a caller cannot distinguish a dead link from a
-            dead network without that difference.
-        """
-        self._pace_outbound_request(url)
-        try:
-            response = getattr(self.page.request, method)(url, timeout=20_000)
-            return int(response.status)
-        except PlaywrightError:
-            return 0
-
-    def _pace_outbound_request(self, url: str) -> None:
-        """Hold a minimum gap between consecutive requests to the *same* host.
-
-        Resolving every published link back-to-back is enough to trip GitHub's
-        rate limiter, which answers ``429`` on an arbitrary subset of the batch
-        and turns a link check into a source of noise.
-
-        The limit being respected is per-host, so the delay is tracked per-host
-        too. A global delay would make every target wait on every other, which
-        both wastes time and protects nothing: a request to Docker Hub does
-        nothing to GitHub's budget. Measured over this site's links, scoping the
-        delay per-host cut the batch from 12.8s to 9.5s with no loss of
-        protection.
-
-        Args:
-            url: The URL about to be requested.
-        """
-        host = urlparse(url).netloc
-        elapsed = time.monotonic() - self._last_request_at_host.get(host, 0.0)
-        if elapsed < OUTBOUND_REQUEST_INTERVAL_SECONDS:
-            time.sleep(OUTBOUND_REQUEST_INTERVAL_SECONDS - elapsed)
-        self._last_request_at_host[host] = time.monotonic()
-
-    def url_status(self, url: str) -> int:
-        """Resolve one URL, preferring ``HEAD`` and confirming with ``GET``.
-
-        ``HEAD`` is tried first because the bodies here are large - resolving
-        this site's links with ``GET`` transfers several megabytes of HTML that
-        is discarded immediately.
-
-        ``HEAD`` support is not universal, though, and a status derived from it
-        alone is not trustworthy enough to fail a build on. Measured against the
-        targets this site publishes, LinkedIn answers ``405`` to ``HEAD`` while
-        answering ``GET``. So the method is only an optimisation for the happy
-        path: anything that is not a clean success is re-checked with ``GET``,
-        and it is that second answer which is reported.
-
-        Args:
-            url: An absolute URL.
-
-        Returns:
-            The status a real client would receive.
-        """
-        status = self._issue_request(url, "head")
-        if 200 <= status < 400:
-            return status
-        return self._issue_request(url, "get")
-
-    def new_tab_link_count(self) -> int:
-        """Count anchors that the decoder marked as opening in a new tab.
-
-        Returns:
-            The number of anchors carrying ``target="_blank"``.
-        """
-        return self.page.locator('a[target="_blank"]').count()
-
-    def unsafe_new_tab_link_count(self) -> int:
-        """Count new-tab anchors missing the ``noopener noreferrer`` hardening.
-
-        Returns:
-            The number of ``target="_blank"`` anchors whose ``rel`` attribute
-            omits either ``noopener`` or ``noreferrer``. A non-zero result is a
-            reverse-tabnabbing exposure.
-        """
-        return self.page.locator(
-            'a[target="_blank"]:not([rel~="noopener"]), '
-            'a[target="_blank"]:not([rel~="noreferrer"])'
-        ).count()
 
     def contact_address(self) -> str:
         """Read the address the decoder wrote into the contact link.

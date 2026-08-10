@@ -1,13 +1,16 @@
-"""Completeness coverage for the four project panels.
+"""Completeness and internal-consistency coverage for the project panels.
 
 Each project tab is a table describing one repository, and the rows are written
-by hand per project. That makes an omission the likely failure: a panel ships
-without the row its siblings all carry, and nothing notices, because every
-individual assertion elsewhere in the suite still passes.
+by hand per project. That makes two failures likely. The first is omission: a
+panel ships without the row its siblings all carry, and nothing notices, because
+every individual assertion elsewhere in the suite still passes. The second
+arrives with the panel that was started by copying a sibling - the rows are all
+present, all well-formed, and one of them still names the repository it was
+copied from.
 
-These tests assert the property across every project at once, so a new project
+These tests assert the properties across every project at once, so a new project
 tab is held to the same contract the existing ones meet rather than inheriting
-whatever its author remembered to include.
+whatever its author remembered to change.
 """
 
 from __future__ import annotations
@@ -16,7 +19,7 @@ import allure
 import pytest
 from playwright.sync_api import expect
 
-from pages.landing_page import LandingPage, NavigationTab
+from pages.landing_page import LandingPage, NavigationTab, github_repository
 
 EPIC_NAME = "Portfolio Website Quality"
 FEATURE_NAME = "Project Panel Completeness"
@@ -28,6 +31,7 @@ PROJECT_TABS: tuple[NavigationTab, ...] = (
     NavigationTab.PORTFOLIO_WEBSITE,
     NavigationTab.WEB_AUTOMATION,
     NavigationTab.HTTP_EMULATORS,
+    NavigationTab.VM_CLUSTER,
 )
 
 #: Accepted spellings of a README target, lower-cased before comparison. The
@@ -131,6 +135,70 @@ def test_project_panel_publishes_a_ci_status_badge(
         assert alt_text.strip(), (
             f"The {project_tab.label} badge has no alt text, so its status is "
             "invisible to a screen reader and to anyone whose images fail."
+        )
+
+
+@allure.epic(EPIC_NAME)
+@allure.feature(FEATURE_NAME)
+@allure.story("Every row of a project panel names the same repository")
+@allure.severity(allure.severity_level.CRITICAL)
+@pytest.mark.parametrize("project_tab", PROJECT_TABS, ids=lambda tab: tab.name.lower())
+def test_project_panel_rows_agree_on_one_repository(
+    desktop_page: LandingPage, project_tab: NavigationTab
+) -> None:
+    """A panel's repository, badge, and README must belong to one repository.
+
+    Each of those three rows is asserted elsewhere, and each of those assertions
+    passes on a panel that is quietly describing two different projects. The
+    badge check only requires a source under this author's account, which is
+    true of every repository he owns, so a panel begun by copying a sibling can
+    keep the sibling's badge and stay green - reporting a build result that
+    belongs to someone else, on the one row of the page whose entire purpose is
+    to say whether this project currently works.
+
+    Nothing about that is visible from the rendered page: the badge draws, the
+    links resolve, and the reader has no way to know the green is unrelated. It
+    is caught by comparing the rows against each other rather than each against
+    a pattern.
+
+    Args:
+        desktop_page: Landing Page Object at the 1920x1080 viewport.
+        project_tab: The project panel under inspection.
+    """
+    landing_page = desktop_page.navigate()
+    landing_page.open_tab(project_tab)
+
+    with allure.step("Read the repository named by each of the three rows"):
+        cited = {
+            "Repo row": landing_page.repository_link(project_tab).get_attribute("href"),
+            "CI badge": landing_page.ci_status_badge(project_tab).get_attribute("src"),
+            "Documentation": landing_page.documentation_link(project_tab).get_attribute(
+                "href"
+            ),
+        }
+        repositories = {
+            row_name: github_repository(target or "") for row_name, target in cited.items()
+        }
+        allure.attach(
+            "\n".join(f"{row_name}: {target}" for row_name, target in cited.items()),
+            name=f"{project_tab.label} targets",
+            attachment_type=allure.attachment_type.TEXT,
+        )
+
+    with allure.step("Verify each row resolved to an identifiable repository"):
+        unresolved = [row_name for row_name, repo in repositories.items() if not repo]
+        assert not unresolved, (
+            f"On the {project_tab.label} panel these rows do not name a GitHub "
+            f"repository: {unresolved}. Targets read: {cited}."
+        )
+
+    with allure.step("Verify all three rows name the same repository"):
+        distinct = set(repositories.values())
+        assert len(distinct) == 1, (
+            f"The {project_tab.label} panel describes more than one repository: "
+            f"{repositories}. Every row of a panel must belong to the project the "
+            "panel is about - a badge left pointing at a sibling reports a green "
+            "build that says nothing about this project."
         )
 
 
