@@ -25,7 +25,28 @@ in the evening in one timezone still agrees with the commit that carries it.
 
 ## v1.1.0 - 2026-08-10
 
+### Added
+
+- **`test_route_publishes_a_meta_description`**, a per-route check that the page
+  declares a `<meta name="description">` and that its content falls between 50
+  and 160 characters. Below the floor is a placeholder; above the ceiling is
+  text a search result truncates, so it was written for nobody. The two failure
+  modes are kept distinct - a missing tag and an empty one are different
+  mistakes and get different messages.
+
+  It earned its place immediately, failing on the case-study page at 199
+  characters on the first run after it was written. Like the rest of
+  `test_dynamic_routes.py` it parameterizes over discovered routes, so a page
+  published later without a description fails on the run that first finds it.
+
+- `RoutePage.meta_description()`, which returns `None` for a missing tag rather
+  than collapsing that into an empty string, so the caller can tell the two
+  apart.
+
 ### Changed
+
+- Suite size is now **73 tests**, **71** on the deployment path (6 dynamic
+  checks × 2 discovered routes).
 
 - **The document-title check asserts the owner's name instead of a library.**
   It required the title to contain "Playwright", which pinned the site's single

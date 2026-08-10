@@ -260,10 +260,10 @@ Verified clean afterwards on every tab at 320px, 390px, and 600px, on both Chrom
 | `test_project_panels.py` | 20 | Per project panel: a Documentation row linking that project's README, decoded to an absolute target and opening in a hardened new tab; a CI badge sourced from that project's own repository and carrying alt text; and the repository row, badge source and README target all reduced to `owner/name` and required to agree |
 | `test_published_image_claims.py` | 1 | The published `apolskiy/flask_app` image installs Flask's dependency closure and nothing beyond it |
 | `test_published_suite_size.py` | 2 | The suite-size figures quoted on the Web Automation tab and in the CI case study match the suite that is running |
-| `test_dynamic_routes.py` | 5 × routes | Per discovered route: HTTP 200, console/network/JS error log, visible DOM root, desktop and mobile overflow |
+| `test_dynamic_routes.py` | 6 × routes | Per discovered route: HTTP 200, console/network/JS error log, visible DOM root, a meta description within usable length bounds, desktop and mobile overflow |
 
-**71 tests** collected against the live site today (5 dynamic × 2 discovered routes), growing automatically as pages are published and as navigation tabs are added.
+**73 tests** collected against the live site today (6 dynamic × 2 discovered routes), growing automatically as pages are published and as navigation tabs are added.
 
-The deployment pipeline runs `pytest -m "not external"` - **69 tests**, depending on nothing but this site. The two `external` tests reach third parties - one resolves outbound links, the other reads the published container image - and run weekly via `external-links.yml`, or on demand with `pytest -m external`.
+The deployment pipeline runs `pytest -m "not external"` - **71 tests**, depending on nothing but this site. The two `external` tests reach third parties - one resolves outbound links, the other reads the published container image - and run weekly via `external-links.yml`, or on demand with `pytest -m external`.
 
 Three suites grow on their own, all from the same declaration. `test_navigation.py` parameterizes over `NavigationTab`, so publishing any tab adds a case; `test_project_panels.py` and `test_engineering_outcomes.py` parameterize over the subset of those tabs that describe a project, contributing four cases and one respectively. The counts above already include the VM Cluster Deployment tab, which added five of them without a test edit.

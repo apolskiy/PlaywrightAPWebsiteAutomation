@@ -104,6 +104,17 @@ class RoutePage(BasePage):
         """
         return list(self._javascript_errors)
 
+    def meta_description(self) -> str | None:
+        """Read the route's meta description exactly as the markup declares it.
+
+        Returns:
+            The ``content`` of ``<meta name="description">``, or ``None`` when
+            the page declares no such tag. The two cases are kept distinct on
+            purpose: a missing tag and a tag left empty are different mistakes,
+            and only the caller can say which message is useful.
+        """
+        return self.page.get_attribute('head > meta[name="description"]', "content")
+
     def document_root(self) -> Locator:
         """Locate the document body.
 

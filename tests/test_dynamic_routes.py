@@ -35,6 +35,12 @@ _DISCOVERED_ROUTES: dict[str, list[DiscoveredRoute]] = {}
 #: Status a route must return to be considered healthy.
 EXPECTED_STATUS_CODE = 200
 
+#: Bounds on a useful meta description, in characters. The lower bound rejects a
+#: placeholder that technically satisfies "not empty"; the upper one is where
+#: search results truncate, so anything beyond it is written for nobody.
+MIN_DESCRIPTION_LENGTH = 50
+MAX_DESCRIPTION_LENGTH = 160
+
 
 def _resolve_routes(config: pytest.Config) -> list[DiscoveredRoute]:
     """Return the routes to parameterize over, crawling only when necessary.
@@ -161,6 +167,67 @@ def test_route_renders_a_visible_dom_root(
         )
         assert document_root.inner_text().strip(), (
             f"Route {discovered_route.url} rendered a body containing no text."
+        )
+
+
+@allure.epic(EPIC_NAME)
+@allure.feature(FEATURE_NAME)
+@allure.story("Every discovered route publishes a usable meta description")
+@allure.severity(allure.severity_level.NORMAL)
+def test_route_publishes_a_meta_description(
+    desktop_route_page: RoutePage, discovered_route: DiscoveredRoute
+) -> None:
+    """A route must describe itself to a search result, within usable bounds.
+
+    The description and the title are the whole of what a search result shows,
+    and neither is visible anywhere in the rendered page - so a page can lose
+    its description, or never have had one, and look completely healthy to every
+    other check in this suite. That is precisely the kind of claim this suite
+    exists to hold: invisible from a browser, and wrong until something reads it.
+
+    Being parameterized over discovered routes, this also covers pages that do
+    not exist yet: publish one without a description and it fails on the run
+    that first discovers it, rather than quietly ranking on nothing.
+
+    Args:
+        desktop_route_page: Diagnostics-recording page at the desktop viewport.
+        discovered_route: One route supplied by the discovery engine.
+    """
+    with allure.step(f"Navigate to {discovered_route.url}"):
+        desktop_route_page.open_route(discovered_route.url)
+
+    with allure.step("Read the route's meta description"):
+        description = desktop_route_page.meta_description()
+        allure.attach(
+            repr(description),
+            name="Meta description",
+            attachment_type=allure.attachment_type.TEXT,
+        )
+
+    with allure.step("Verify the route declares a description at all"):
+        assert description is not None, (
+            f"Route {discovered_route.url} publishes no "
+            '<meta name="description">. A search engine will then quote whatever '
+            "text it finds first, which is not a decision worth leaving to it."
+        )
+
+    with allure.step("Verify the description is not blank"):
+        trimmed = description.strip()
+        assert trimmed, (
+            f"Route {discovered_route.url} declares a meta description tag whose "
+            "content is empty, which is worse than omitting it: it looks "
+            "deliberate."
+        )
+
+    with allure.step(
+        f"Verify the description is {MIN_DESCRIPTION_LENGTH}-"
+        f"{MAX_DESCRIPTION_LENGTH} characters"
+    ):
+        assert MIN_DESCRIPTION_LENGTH <= len(trimmed) <= MAX_DESCRIPTION_LENGTH, (
+            f"Route {discovered_route.url} has a {len(trimmed)}-character meta "
+            f"description; usable range is {MIN_DESCRIPTION_LENGTH}-"
+            f"{MAX_DESCRIPTION_LENGTH}. Shorter reads as a placeholder, longer is "
+            f"truncated in a search result. Content: {trimmed!r}"
         )
 
 
