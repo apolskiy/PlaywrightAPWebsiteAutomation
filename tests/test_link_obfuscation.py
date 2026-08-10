@@ -178,7 +178,22 @@ def test_new_tab_links_declare_noopener_and_noreferrer(desktop_page: LandingPage
 def test_contact_link_is_decoded_without_exposing_the_address(
     desktop_page: LandingPage,
 ) -> None:
-    """The decoder must produce a working ``mailto:`` while hiding the address.
+    """The decoder must produce a working ``mailto:`` with no address in the text.
+
+    What this guarantees is narrower than the test name suggests, and the limit
+    is worth stating where the contract lives. The address is asserted to be
+    absent from the *rendered text*, and simultaneously asserted to be present
+    in the ``href`` - because a contact link that does not carry the address is
+    not a contact link. So the browser will show it in the status bar on hover,
+    and devtools will show it outright. That is inherent to a working anchor,
+    not a gap in this check.
+
+    The obfuscation defeats scrapers that read HTML without executing it. It
+    does not defeat a headless browser, and base64 is an encoding rather than a
+    cipher, so it does not defeat a scraper that decodes ``data-`` attributes
+    either. The site's README states the same limit; this docstring exists so
+    the boundary is legible to whoever next reads the assertion and wonders why
+    the address is allowed to sit in the ``href``.
 
     Args:
         desktop_page: Landing Page Object at the 1920x1080 viewport.

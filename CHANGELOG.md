@@ -23,6 +23,31 @@ in the evening in one timezone still agrees with the commit that carries it.
 
 ---
 
+## v1.1.1 - 2026-08-10
+
+### Changed
+
+- **`test_contact_link_is_decoded_without_exposing_the_address` documents the
+  boundary it actually enforces.** The check asserts the address is absent from
+  the rendered text while `expect_email_link_decoded` asserts it is *present* in
+  the `href` - deliberately, since a contact link that does not carry the
+  address is not a contact link. Read quickly, those look contradictory, and the
+  test name suggests a stronger guarantee than either provides.
+
+  The docstring now says so: the address is visible in the status bar on hover
+  and in devtools, that is inherent to a working anchor rather than a gap in the
+  check, and the obfuscation defeats only scrapers that read HTML without
+  executing it. No assertion changed - the suite was already testing exactly the
+  right thing, and only the reason was missing.
+
+### Notes
+
+- No test was added for the status-bar exposure, because there is nothing to
+  assert: every functioning `mailto:` anchor reveals its address that way. The
+  corresponding limitation is now stated on the site rather than checked here.
+
+---
+
 ## v1.1.0 - 2026-08-10
 
 ### Added
