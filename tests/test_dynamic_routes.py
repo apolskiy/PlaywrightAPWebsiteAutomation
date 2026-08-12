@@ -114,6 +114,17 @@ def test_route_loads_without_console_or_network_errors(
 ) -> None:
     """No route may log a console error, break a request, or throw in JavaScript.
 
+    The three network-facing assertions are scoped to the site's own origin,
+    and that scoping is the whole reason this test can stay on the deployment
+    path. Every project panel embeds a CI badge image served by GitHub, so an
+    unscoped assertion here would fail this suite whenever GitHub had a bad
+    minute - a third-party dependency arriving through a sub-resource rather
+    than through anything the test does on purpose. Third-party problems are
+    still recorded and still reported; they simply do not decide the verdict.
+
+    Unhandled JavaScript exceptions are not scoped that way, deliberately: an
+    exception is raised by a script this site chose to run, whoever served it.
+
     Args:
         desktop_route_page: Diagnostics-recording page at the desktop viewport.
         discovered_route: One route supplied by the discovery engine.
@@ -121,26 +132,46 @@ def test_route_loads_without_console_or_network_errors(
     with allure.step(f"Navigate to {discovered_route.url}"):
         desktop_route_page.open_route(discovered_route.url)
 
-    with allure.step("Verify no sub-resource returned an error status"):
-        assert not desktop_route_page.broken_resources, (
-            "The route requested resources that failed to load: "
-            f"{desktop_route_page.broken_resources}."
+    with allure.step("Let sub-resources finish before reading the error log"):
+        settled = desktop_route_page.settle_sub_resources()
+
+    diagnostics = desktop_route_page.diagnostics
+    with allure.step(f"Collect the browser log ({diagnostics.summary()})"):
+        allure.attach(
+            diagnostics.report(),
+            name="Browser diagnostics",
+            attachment_type=allure.attachment_type.TEXT,
         )
 
-    with allure.step("Verify no request failed at the network level"):
-        assert not desktop_route_page.failed_requests, (
-            f"The route had failed network requests: {desktop_route_page.failed_requests}."
+    unsettled_note = (
+        ""
+        if settled
+        else " Note: sub-resources had not finished loading when the log was read, "
+        "so this list may be incomplete."
+    )
+
+    with allure.step("Verify no first-party sub-resource returned an error status"):
+        assert not diagnostics.first_party_broken_resources, (
+            f"Route {discovered_route.url} requested resources of its own that "
+            f"failed to load: {diagnostics.first_party_broken_resources}.{unsettled_note}"
         )
 
-    with allure.step("Verify the console logged no errors"):
-        assert not desktop_route_page.console_errors, (
-            f"The route logged console errors: {desktop_route_page.console_errors}."
+    with allure.step("Verify no first-party request failed at the network level"):
+        assert not diagnostics.first_party_failed_requests, (
+            f"Route {discovered_route.url} had failed network requests to its own "
+            f"origin: {diagnostics.first_party_failed_requests}.{unsettled_note}"
+        )
+
+    with allure.step("Verify the console logged no first-party errors"):
+        assert not diagnostics.first_party_console_errors, (
+            f"Route {discovered_route.url} logged console errors: "
+            f"{diagnostics.first_party_console_errors}.{unsettled_note}"
         )
 
     with allure.step("Verify no unhandled JavaScript exception was raised"):
-        assert not desktop_route_page.javascript_errors, (
-            "The route raised unhandled JavaScript exceptions: "
-            f"{desktop_route_page.javascript_errors}."
+        assert not diagnostics.javascript_errors, (
+            f"Route {discovered_route.url} raised unhandled JavaScript exceptions: "
+            f"{diagnostics.javascript_errors}."
         )
 
 

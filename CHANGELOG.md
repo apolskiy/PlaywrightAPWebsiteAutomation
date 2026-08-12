@@ -23,6 +23,137 @@ in the evening in one timezone still agrees with the commit that carries it.
 
 ---
 
+## v1.2.0 - 2026-08-12
+
+### Added
+
+- **`utils/page_diagnostics.py`, and with it the browser's error log on every
+  page in the suite.** `PageDiagnostics` records console errors, requests that
+  failed at the network level, responses of 400 and above, and unhandled
+  JavaScript exceptions. `BasePage` constructs one, so every Page Object carries
+  it and the fixtures arm it before the first navigation - Playwright delivers
+  no event that predates its listener, so recording cannot be retrofitted after
+  a failure.
+
+  The recording itself is not new; its reach is. It lived on `RoutePage`, which
+  meant it covered 12 of 73 tests and only the load path: navigate, read the
+  log, done. The ~61 landing-page tests recorded nothing, and those are the ones
+  that click - the tab router and the base64 link decoder are the only scripts
+  this site runs, and neither executes until a visitor does something. An
+  exception thrown by either was invisible to the whole suite. What it produced
+  instead was a locator timeout, which reports that an element never appeared
+  and says nothing whatsoever about why.
+
+- **`tests/test_runtime_health.py`**, one test that walks all seven tabs in
+  order and then requires the log to be clean. One test rather than one per tab
+  on purpose: the router is a state machine over a shared page, so the failures
+  worth catching are the ones that need a sequence - a listener bound twice, a
+  panel left visible, a decoder run again over already-decoded markup - and a
+  per-tab test reloading between clicks would reset the state that produces
+  them.
+
+- **The error log is now an input to Claude failure triage.** `FailureContext`
+  carries a `browser_diagnostics` field and the prompt renders it as its own
+  section, ahead of the DOM.
+
+  The two inputs answer different halves of the question. The DOM shows what the
+  page ended up as; the log shows what went wrong on the way there, and it
+  frequently names the cause outright - a script that threw before it could bind
+  the tab router explains a missing panel far more directly than the absence of
+  that panel does. Sending only the DOM was asking for a cause while withholding
+  the evidence for it.
+
+  The system prompt gained instructions for reading it, because the log is only
+  useful if its structure is understood: an unhandled exception is the strongest
+  signal available given that this site's only scripts are the router and the
+  decoder; a failure supported solely by third-party events is a flake, since
+  the suite deliberately does not fail on those; and an empty log is evidence
+  rather than an absence of it, ruling out script exceptions and missing
+  resources.
+
+  The field is required rather than optional. A caller with nothing to report
+  passes the report of a recorder that saw nothing - which *states* that no
+  errors occurred, a materially different claim from omitting the section, and
+  one the prompt now reasons from explicitly.
+
+- **`MAX_DIAGNOSTICS_CHARS`** (8,000) in `config/settings.py`, bounding that
+  input the way `MAX_DOM_SNAPSHOT_CHARS` bounds the DOM. The smaller budget
+  reflects that the log is already a summary - but it is not bounded by the
+  page, and a request loop or a script erroring on every frame can produce
+  thousands of near-identical lines. Truncation of either input is now announced
+  in the prompt text by a shared helper: a model reasoning over a fragment it
+  believes is complete will report that something is absent when it was merely
+  cut off, which is a confident wrong answer rather than a missing one.
+
+- **`BasePage.settle_sub_resources()`**, a short, non-fatal wait for the `load`
+  event before the log is read. Every navigation here waits for
+  `domcontentloaded`, which is the right readiness signal for interacting with
+  the page and the wrong one for reading its error log: at that moment the
+  sub-resources are still in flight, so a check reading the log immediately is
+  racing them. A timeout is not an error - the page embeds badges served by
+  GitHub, and failing on a slow third party is exactly what this release is
+  removing - so a caller that did not settle says so in its failure message
+  rather than failing on the wait.
+
+### Changed
+
+- **The error log is attached to every failure, by the failure hook rather than
+  by the test.** Previously it was read only by the one test asserting on it and
+  discarded at teardown otherwise: a mobile-overflow failure would tear down a
+  page whose recorded console log might have explained it outright. It is now
+  attached to Allure alongside the screenshot, DOM and trace, and published as a
+  pytest report section so it also appears beneath the traceback in the terminal,
+  in the CI log, and in `reports/pytest-report.html`.
+
+  It is attached first and outside the screenshot capture block, because the
+  events are already in memory: it is the one piece of evidence that survives a
+  page which has closed under the test.
+
+- **Network assertions in `test_route_loads_without_console_or_network_errors`
+  are now scoped to the site's own origin, which removes an unintended
+  third-party dependency from the deployment path.** Every project panel embeds
+  a CI badge image served by `github.com`. The test asserted that no
+  sub-resource returned an error status, ran against `/`, and was not marked
+  `external` - so a 5xx from GitHub could fail the deploy signal. It did not
+  fail in practice mainly because the assertions ran at `domcontentloaded` while
+  the badge responses were still in flight; the check was racing the images,
+  which makes it a nondeterministic dependency rather than an absent one.
+
+  Verified rather than argued: with the badge host forced to answer 503, the
+  recorder logs 10 events, all of them third-party, and every first-party list
+  stays empty. Under the previous code those 10 would have failed the run.
+
+  Unhandled JavaScript exceptions are deliberately not scoped this way. An
+  exception is raised by a script this site chose to run, whoever served it.
+
+- **`RoutePage` no longer records anything itself.** Its four diagnostic
+  properties and four event handlers moved to the collaborator, leaving a Page
+  Object that navigates a route and reads what it rendered. Call sites read
+  `route_page.diagnostics.first_party_console_errors`, the same shape as
+  `landing_page.links.outbound_targets()`.
+
+- Suite size is now **72 tests on the deployment path, plus the 2 `external`
+  ones - 74 in total**. Written as a sum rather than as a pair: the two figures
+  had been quoted as a total followed by a subset, which shortens to "74/72" and
+  reads as a fraction whose denominator is smaller than its numerator. The site
+  publishing them was reworded the same way in its own v1.2.0.
+
+### Fixed
+
+- **Stale figures in the README's *Dynamic Site Discovery* section.** It still
+  described five health checks per route and ten dynamic tests; the meta
+  description check added in v1.1.0 made those six and twelve. The section stamp
+  had not been moved with that release, which is the failure mode the stamps
+  exist to make visible - and did, on the next read.
+
+### Notes
+
+- No test was added for the recorder itself. It is exercised by the two tests
+  that assert on it and by the failure hook on every red build, and a unit test
+  over a stubbed `Page` would assert that Playwright delivers its own events.
+
+---
+
 ## v1.1.1 - 2026-08-10
 
 ### Changed

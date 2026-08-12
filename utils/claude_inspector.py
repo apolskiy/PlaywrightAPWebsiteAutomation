@@ -2,8 +2,16 @@
 
 When a web-first assertion fails, the raw Playwright error rarely explains *why*
 the application changed - it only reports which locator stopped resolving. This
-module hands the post-failure DOM snapshot to Claude and asks for a structured
-root-cause hypothesis, which the pytest hook then attaches to the Allure report.
+module hands the post-failure DOM snapshot and the browser's own error log to
+Claude and asks for a structured root-cause hypothesis, which the pytest hook
+then attaches to the Allure report.
+
+The two inputs answer different halves of the question. The DOM shows what the
+page ended up as; the error log shows what went wrong on the way there, and it
+frequently names the cause outright - a script that threw before it could bind
+the tab router explains a missing panel far more directly than the absence of
+that panel does. Sending only the DOM meant asking for a cause while withholding
+the evidence for it.
 
 The inspector is strictly advisory: it never raises into the test session, and
 any transport or credential problem degrades to "no report" rather than turning
@@ -17,7 +25,7 @@ from dataclasses import dataclass
 
 import anthropic
 
-from config.settings import MAX_DOM_SNAPSHOT_CHARS, Settings
+from config.settings import MAX_DIAGNOSTICS_CHARS, MAX_DOM_SNAPSHOT_CHARS, Settings
 
 LOGGER = logging.getLogger(__name__)
 
@@ -32,17 +40,33 @@ MAX_RESPONSE_TOKENS: int = 8_000
 SYSTEM_PROMPT: str = (
     "You are a senior test automation engineer triaging a failed Playwright "
     "end-to-end test against a static single-page portfolio website. You are "
-    "given the assertion error and the fully rendered DOM captured at the "
-    "moment of failure.\n\n"
+    "given the assertion error, the browser's own error log for the page, and "
+    "the fully rendered DOM captured at the moment of failure.\n\n"
+    "How to read the error log:\n"
+    "- It lists console errors, requests that failed outright, responses of 400 "
+    "and above, and unhandled JavaScript exceptions, split into events the site "
+    "under test is answerable for and events belonging to third-party hosts it "
+    "merely embeds.\n"
+    "- An unhandled exception is the strongest signal available: the site's only "
+    "scripts are a tab router and a base64 link decoder, so an exception there "
+    "explains a missing panel or an undecoded link directly, and the DOM only "
+    "shows the aftermath.\n"
+    "- A failure whose sole supporting evidence is third-party is "
+    "'environment/flake'. The suite deliberately does not fail on third-party "
+    "events, so if they are all you can find, say so.\n"
+    "- An empty log is evidence too, not an absence of it: it rules out script "
+    "exceptions and missing resources, which points at the DOM or at the "
+    "assertion itself.\n\n"
     "Answer with these four sections and nothing else:\n"
     "1. VERDICT - one line: 'application regression', 'test defect', "
     "'environment/flake', or 'inconclusive'.\n"
-    "2. EVIDENCE - the specific elements, attributes, or missing nodes in the "
-    "DOM that support the verdict. Quote real snippets; never invent markup.\n"
+    "2. EVIDENCE - the specific log entries, elements, attributes, or missing "
+    "nodes that support the verdict. Quote real entries and real markup; never "
+    "invent either. Say which input each piece came from.\n"
     "3. ROOT CAUSE - the most probable explanation in two sentences or fewer.\n"
     "4. SUGGESTED FIX - the concrete locator, assertion, or application change "
     "to make.\n\n"
-    "If the DOM does not contain enough information to decide, say so in the "
+    "If these inputs do not contain enough information to decide, say so in the "
     "VERDICT rather than guessing."
 )
 
@@ -55,12 +79,19 @@ class FailureContext:
         test_name: The pytest node identifier of the failing test.
         page_url: URL the browser was on when the failure occurred.
         error_text: The captured assertion or exception text.
+        browser_diagnostics: The rendered browser error log for the page, as
+            produced by :meth:`~utils.page_diagnostics.PageDiagnostics.report`.
+            Required rather than optional: a caller that has nothing to say here
+            should pass the report of a recorder that saw nothing, which states
+            that no errors occurred - a materially different claim from omitting
+            the field, and one the triage prompt reasons from explicitly.
         dom_snapshot: Fully rendered HTML of the page at failure time.
     """
 
     test_name: str
     page_url: str
     error_text: str
+    browser_diagnostics: str
     dom_snapshot: str
 
 
@@ -159,27 +190,50 @@ class ClaudeTestInspector:
         return self._client
 
     @staticmethod
-    def _build_prompt(failure_context: FailureContext) -> str:
+    def _bounded(text: str, limit: int, label: str) -> str:
+        """Cap one prompt input, saying so in the text when it was capped.
+
+        A silent truncation is worse than a short input: the model would reason
+        over a partial log or a partial document believing it had the whole one,
+        and could then report with confidence that something is absent when it
+        was merely cut off.
+
+        Args:
+            text: The input to bound.
+            limit: Maximum number of characters to keep.
+            label: Name of the input, used in the truncation note.
+
+        Returns:
+            The text, followed by an explicit note when it was shortened.
+        """
+        if len(text) <= limit:
+            return text
+        return f"{text[:limit]}\n[{label} truncated to the first {limit} characters]"
+
+    @classmethod
+    def _build_prompt(cls, failure_context: FailureContext) -> str:
         """Render the user turn describing one failure.
+
+        The error log precedes the DOM. It is far smaller and far more likely to
+        name the cause outright, and it is the input that survives intact - the
+        DOM is the one that gets cut when a page is large.
 
         Args:
             failure_context: The failure being triaged.
 
         Returns:
-            A prompt containing the test identity, the error, and a bounded DOM
-            snapshot.
+            A prompt containing the test identity, the error, the bounded
+            browser log, and the bounded DOM snapshot.
         """
-        truncated_dom = failure_context.dom_snapshot[:MAX_DOM_SNAPSHOT_CHARS]
-        truncation_note = (
-            ""
-            if len(failure_context.dom_snapshot) <= MAX_DOM_SNAPSHOT_CHARS
-            else f"\n[DOM truncated to the first {MAX_DOM_SNAPSHOT_CHARS} characters]"
-        )
         return (
             f"FAILED TEST: {failure_context.test_name}\n"
             f"PAGE URL: {failure_context.page_url}\n\n"
             f"ASSERTION ERROR:\n{failure_context.error_text}\n\n"
-            f"RENDERED DOM AT FAILURE:\n{truncated_dom}{truncation_note}"
+            "BROWSER ERROR LOG:\n"
+            f"{cls._bounded(failure_context.browser_diagnostics, MAX_DIAGNOSTICS_CHARS, 'Log')}"
+            "\n\n"
+            "RENDERED DOM AT FAILURE:\n"
+            f"{cls._bounded(failure_context.dom_snapshot, MAX_DOM_SNAPSHOT_CHARS, 'DOM')}"
         )
 
     @staticmethod

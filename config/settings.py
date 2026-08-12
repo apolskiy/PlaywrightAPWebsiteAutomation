@@ -37,6 +37,12 @@ DEFAULT_EXPECT_TIMEOUT_MS: Final[int] = 10_000
 #: token spend bounded when a failure occurs on a very large page.
 MAX_DOM_SNAPSHOT_CHARS: Final[int] = 40_000
 
+#: Upper bound on the browser error log handed to the same hook. Far smaller
+#: than the DOM bound because the log is already a summary - but it is not
+#: bounded by the page, and a request loop or a script erroring on every frame
+#: can produce thousands of near-identical lines.
+MAX_DIAGNOSTICS_CHARS: Final[int] = 8_000
+
 
 def _env_flag(name: str, *, default: bool = False) -> bool:
     """Interpret an environment variable as a boolean flag.

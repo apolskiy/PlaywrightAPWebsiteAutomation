@@ -5,10 +5,13 @@ that the responsive assertions in ``tests/test_responsive.py`` are reproducible
 rather than dependent on the host window size.
 
 The module also installs the ``pytest_runtest_makereport`` wrapper that, for any
-failing test, attaches to the Allure report: a full-page screenshot, the fully
-rendered DOM, a Playwright trace of the whole test, and - when enabled - a Claude
-root-cause analysis. Tracing runs for every test but the artifact is written only
-on failure, so a green run leaves nothing behind.
+failing test, attaches to the Allure report: the browser's own error log, a
+full-page screenshot, the fully rendered DOM, a Playwright trace of the whole
+test, and - when enabled - a Claude root-cause analysis. The error log is
+additionally published as a pytest report section, so it appears in the terminal
+summary and in ``reports/pytest-report.html`` for anyone not opening Allure.
+Recording and tracing both run for every test, but neither artifact is written
+unless the test fails, so a green run leaves nothing behind.
 """
 
 from __future__ import annotations
@@ -358,10 +361,12 @@ def _provision_landing_page(
             fallback path.
 
     Yields:
-        A :class:`LandingPage` bound to a fresh, correctly sized page.
+        A :class:`LandingPage` bound to a fresh, correctly sized page that is
+        already recording browser errors.
     """
     context = _open_context(browser, viewport, javascript_enabled=javascript_enabled)
     landing_page = LandingPage(context.new_page(), framework_settings.base_url)
+    landing_page.diagnostics.record()
     session = DIAGNOSTICS_REGISTRY.register_session(node_id, landing_page, context)
     try:
         yield landing_page
@@ -393,7 +398,7 @@ def _provision_route_page(
     """
     context = _open_context(browser, viewport)
     route_page = RoutePage(context.new_page())
-    route_page.record_diagnostics()
+    route_page.diagnostics.record()
     session = DIAGNOSTICS_REGISTRY.register_session(node_id, route_page, context)
     try:
         yield route_page
@@ -523,8 +528,46 @@ def pytest_runtest_makereport(
     """
     report = yield
     if report.when == "call" and report.failed:
+        _publish_browser_diagnostics(item, report)
         _attach_failure_diagnostics(item, _render_failure(call, report))
     return report
+
+
+def _browser_diagnostics_text(page_object: BasePage) -> str:
+    """Render one page's recorded browser errors, tolerating a closed page.
+
+    Args:
+        page_object: The Page Object driving the failing test.
+
+    Returns:
+        The rendered diagnostic report, or a note explaining why it could not
+        be read. Evidence collection must never replace a real failure with a
+        different one.
+    """
+    try:
+        return page_object.diagnostics.report()
+    except PlaywrightError as diagnostics_error:
+        return f"Browser diagnostics could not be read: {diagnostics_error}"
+
+
+def _publish_browser_diagnostics(item: pytest.Item, report: pytest.TestReport) -> None:
+    """Attach the browser's error log to the pytest report as a section.
+
+    Allure is the richer report, but it is not always the one being read - a CI
+    log and ``reports/pytest-report.html`` are both closer to hand. A pytest
+    section reaches all three, and appears directly beneath the traceback of
+    the test it belongs to.
+
+    Args:
+        item: The failing test item.
+        report: The report being built for it.
+    """
+    session = DIAGNOSTICS_REGISTRY.session_for(item.nodeid)
+    if session is None:
+        return
+    report.sections.append(
+        ("Browser diagnostics", _browser_diagnostics_text(session.page_object))
+    )
 
 
 def _render_failure(call: pytest.CallInfo, report: pytest.TestReport) -> str:
@@ -600,6 +643,18 @@ def _attach_failure_diagnostics(item: pytest.Item, error_text: str) -> None:
         return
     page_object = session.page_object
 
+    # Read and attached first, and outside the capture block below: the events
+    # are already in memory, so this is the one piece of evidence that survives
+    # a page which has closed under the test. The same text is handed to the
+    # inspector further down, so the report a human reads and the log the model
+    # reasons from cannot disagree.
+    browser_diagnostics = _browser_diagnostics_text(page_object)
+    allure.attach(
+        browser_diagnostics,
+        name=f"Browser diagnostics - {page_object.diagnostics.summary()}",
+        attachment_type=allure.attachment_type.TEXT,
+    )
+
     try:
         dom_snapshot = page_object.dom_snapshot()
         page_url = page_object.page.url
@@ -626,6 +681,7 @@ def _attach_failure_diagnostics(item: pytest.Item, error_text: str) -> None:
             test_name=item.nodeid,
             page_url=page_url,
             error_text=error_text,
+            browser_diagnostics=browser_diagnostics,
             dom_snapshot=dom_snapshot,
         )
     )

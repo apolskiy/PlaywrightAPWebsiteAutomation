@@ -3,11 +3,25 @@
 :class:`BasePage` owns the low-level browser plumbing (navigation, viewport
 control, DOM capture) so that concrete Page Objects only describe the semantics
 of their own screen. No test module is expected to import this class directly.
+
+Every page also carries a :class:`~utils.page_diagnostics.PageDiagnostics`
+recorder, so that whatever the browser complains about is available both to the
+test that hit it and to the failure hook that reports it - regardless of which
+Page Object the test happens to be driving.
 """
 
 from __future__ import annotations
 
-from playwright.sync_api import Locator, Page
+from typing import Final
+
+from playwright.sync_api import Error as PlaywrightError, Locator, Page
+
+from utils.page_diagnostics import PageDiagnostics
+
+#: How long to let sub-resources finish before reading the diagnostic log, in
+#: milliseconds. Deliberately short and deliberately not fatal - see
+#: :meth:`BasePage.settle_sub_resources`.
+SUB_RESOURCE_SETTLE_TIMEOUT_MS: Final[int] = 5_000
 
 
 class BasePage:
@@ -19,6 +33,12 @@ class BasePage:
 
     def __init__(self, page: Page) -> None:
         self._page = page
+        #: Recorder for the errors the browser raises against this page. Held
+        #: as a collaborator rather than folded in as more methods: it drives
+        #: nothing and reads nothing, it only listens. Fixtures arm it before
+        #: the first navigation, because Playwright delivers no event that
+        #: predates its listener.
+        self.diagnostics = PageDiagnostics(page)
 
     @property
     def page(self) -> Page:
@@ -51,6 +71,35 @@ class BasePage:
             height: Viewport height in CSS pixels.
         """
         self._page.set_viewport_size({"width": width, "height": height})
+
+    def settle_sub_resources(self) -> bool:
+        """Give images, styles, and scripts a moment to finish loading.
+
+        Every navigation in this suite waits for ``domcontentloaded``, which is
+        the right readiness signal for interacting with the page but the wrong
+        one for reading its error log: at that moment the sub-resources are
+        still in flight, so a broken stylesheet or a missing icon has not
+        reported itself yet and a check reading the log immediately would be
+        racing them.
+
+        The wait is short, and a timeout is *not* an error. The page under test
+        embeds CI badges served by GitHub, so ``load`` genuinely may not arrive
+        promptly - and turning that into a failure would import a third party's
+        availability into the suite through the back door, which is precisely
+        what this design is trying to avoid. A caller that did not settle simply
+        reports on whatever had been observed by then.
+
+        Returns:
+            ``True`` when the ``load`` event arrived within the timeout,
+            ``False`` when the wait expired or the page could not be reached.
+        """
+        try:
+            self._page.wait_for_load_state(
+                "load", timeout=SUB_RESOURCE_SETTLE_TIMEOUT_MS
+            )
+            return True
+        except PlaywrightError:
+            return False
 
     def title(self) -> str:
         """Return the document title.
