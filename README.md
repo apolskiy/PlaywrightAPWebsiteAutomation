@@ -4,7 +4,7 @@ A production-grade E2E web automation and dynamic route-discovery framework buil
 
 Target Application: [https://apolskiy.github.io/](https://apolskiy.github.io/)
 
-> **Documentation status:** describes **v1.2.1**, reviewed 2026-08-12.
+> **Documentation status:** describes **v1.2.2**, reviewed 2026-08-12.
 > Each section below carries the release and date its content last changed, so a
 > reader arriving at a later version can see at a glance which parts moved. This
 > file always describes the *current* state; release-to-release history lives in
@@ -90,7 +90,7 @@ PlaywrightAPWebsiteAutomation/
 
 ## Quick Start
 
-<sub>v1.0.0 &middot; 2026-08-10</sub>
+<sub>v1.2.2 &middot; 2026-08-12</sub>
 
 Requires **Python 3.10+** - the highest floor declared by any pinned dependency. Developed, verified, and CI-pinned on **3.14**.
 
@@ -110,9 +110,23 @@ python -m pytest --browser=chromium --browser=firefox --browser=webkit
 python -m pytest --headed --slowmo 250          # watch a run locally
 ```
 
-The suite is verified locally on Chromium and Firefox. CI installs and runs Chromium only, so a WebKit-specific regression would not be caught by the pipeline.
+**All three engines pass.** Measured 2026-08-12 against the live site, on one Windows machine, `-m "not external"`:
 
-**Why Chromium only.** The three-engine CI matrix was considered and deliberately not built. This target's behaviour rests on ordinary DOM, CSS and `atob` rather than engine-specific APIs, so the residual risk is concentrated in layout - already asserted on both sides of the 600px breakpoint at every viewport. WebKit on Linux runners is also the noisiest of the three, and a measured "zero unexplained failures" record is worth more than coverage of a defect class this site has not produced. Firefox and WebKit stay one flag away for local verification. Worth revisiting if the site adopts CSS with uneven support, or if a Safari-specific defect is ever reported.
+| Engine | Result | Wall clock |
+| --- | --- | --- |
+| Chromium | 72 passed | 34.6s |
+| WebKit | 72 passed | 52.1s |
+| Firefox | 72 passed | 102.7s |
+
+These are single runs over a real network, not a controlled benchmark: read them as an order of magnitude, not a measurement of the engines. CI installs and runs Chromium only, so Firefox and WebKit are a *verified state* rather than a continuously enforced one, and a regression specific to either would not be caught by the pipeline.
+
+Playwright's WebKit is a build of the engine, not Safari. It shares the renderer but not Safari's platform integration, so the row above is evidence this page is engine-neutral - not evidence that Safari works.
+
+**Why Chromium only.** The three-engine CI matrix was considered and deliberately not built. This target's behaviour rests on ordinary DOM, CSS and `atob` rather than engine-specific APIs, so the residual risk is concentrated in layout - already asserted on both sides of the 600px breakpoint at every viewport. The table above is the argument rather than an objection to it: three engines agreeing exactly is what a page with no engine-specific surface should produce, and re-proving that on every push would cost roughly 3.4x the wall clock for a defect class this site has never yet produced. Firefox is the expensive one, at three times Chromium.
+
+The cost that matters is not runner minutes, though. This pipeline gates a deployment signal, which is why `external`-marked tests are already deselected from it: a verdict on this site must not turn on whether a third party answers. Adding engines re-admits that same class of unrelated red, as engine-specific timing flake, into the one signal that is supposed to mean "this deploy is good".
+
+Firefox and WebKit stay one flag away for local verification, and the figures above are refreshed when the pins move. Worth revisiting if the site adopts CSS with uneven support, or if a Safari-specific defect is ever reported.
 
 If the matrix is ever built, two details decide whether it answers the question it is meant to answer. Each engine must run as its own single-engine job with `fail-fast: false`, so a red engine cannot cancel its siblings and erase the comparison. And the deployment gate must run **once**, upstream of the matrix, publishing the settled `ETag` for each engine to re-check before it starts: three jobs gating independently can settle on different deployments, at which point a difference between two engines may be content drift rather than an engine defect - the failure this suite's deployment gate already exists to prevent, reappearing one level up.
 

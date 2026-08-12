@@ -5,8 +5,9 @@
 #   >=3.10). CI pins 3.14 to match the development interpreter.
 #
 # Versions below are the exact releases installed and exercised on this
-# machine: the full suite passes on Chromium and Firefox, and Pylint scores
-# 10.00/10, against precisely these pins.
+# machine: the 72 deployment-path tests pass on all three engines Playwright
+# ships - Chromium, Firefox and WebKit - and Pylint scores 10.00/10, against
+# precisely these pins. Last measured 2026-08-12 against the live site.
 
 # Browser automation
 playwright==1.61.0

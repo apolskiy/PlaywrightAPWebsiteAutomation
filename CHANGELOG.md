@@ -23,6 +23,56 @@ in the evening in one timezone still agrees with the commit that carries it.
 
 ---
 
+## v1.2.2 - 2026-08-12
+
+A documentation correction backed by a measurement. **Patch**: no framework
+source, configuration or test changed.
+
+### Fixed
+
+- **The suite's browser coverage was described inconsistently in four places.**
+  `requirements.txt`, this repository's README and the site's README all said
+  the suite was verified on Chromium and Firefox, with WebKit untested; the Web
+  Automation tab said it "runs on Firefox and WebKit on request", which reads as
+  WebKit being covered. Three sources said one thing and the fourth implied
+  another.
+
+  The disagreement was resolved by running the suite rather than by choosing a
+  wording. WebKit turned out not to be installed for the pinned Playwright
+  release at all - `webkit-2311` was required, `webkit-2227` was present, and
+  every test errored at browser launch. Installed and run, **all 72
+  deployment-path tests passed on all three engines**, measured 2026-08-12
+  against the live site on one Windows machine:
+
+  | Engine | Result | Wall clock |
+  | --- | --- | --- |
+  | Chromium | 72 passed | 34.6s |
+  | WebKit | 72 passed | 52.1s |
+  | Firefox | 72 passed | 102.7s |
+
+  So the claim that needed correcting was the conservative one, not the
+  optimistic one. All four sources now state the measured result, dated, with
+  the caveat that these are single runs over a real network rather than a
+  controlled benchmark.
+
+### Changed
+
+- **The "Why Chromium only" rationale now rests on the measurement.** It
+  previously asserted that WebKit on Linux runners is the noisiest of the three,
+  which nothing in this repository had measured. Replaced with what the figures
+  actually support: three engines agreeing exactly is the expected result for a
+  page with no engine-specific surface, and re-proving it per push would cost
+  about 3.4x the wall clock. The argument that carries more weight is unchanged
+  and is now stated first - this pipeline gates a deployment signal, and extra
+  engines re-admit unrelated red into it, which is the same reason `external`
+  tests are already deselected.
+- **Playwright's WebKit is now distinguished from Safari** wherever the pass is
+  claimed. It shares the renderer, not Safari's platform integration, so the
+  result is evidence the page is engine-neutral rather than evidence that Safari
+  works.
+
+---
+
 ## v1.2.1 - 2026-08-12
 
 ### Fixed
