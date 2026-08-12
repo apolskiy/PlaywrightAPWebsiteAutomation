@@ -23,6 +23,25 @@ in the evening in one timezone still agrees with the commit that carries it.
 
 ---
 
+## v1.2.1 - 2026-08-12
+
+### Fixed
+
+- **A README feature bullet quoted "12 of 73 tests", a total the suite left
+  behind in the same release that introduced the sentence.** v1.2.0 took the
+  suite to 74, so the paragraph describing what changed carried the pre-change
+  figure with no tense marking it as history. The site had the same sentence in
+  an outcome row, where it sat two clicks from a published, self-verifying 74 -
+  reported as a defect, and correctly.
+
+  Both now say only the per-route load checks recorded anything and nothing that
+  clicks did. That was always the claim; the denominator was decoration, and
+  decoration that goes stale on the next test added. The figure in `CHANGELOG.md`
+  is untouched - a changelog entry is dated and describes the state at its
+  release, which is exactly where a superseded number belongs.
+
+---
+
 ## v1.2.0 - 2026-08-12
 
 ### Added
