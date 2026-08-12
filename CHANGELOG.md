@@ -23,6 +23,25 @@ in the evening in one timezone still agrees with the commit that carries it.
 
 ---
 
+## v1.2.3 - 2026-08-12
+
+A documentation clarification. **Patch**: no source, configuration or test
+changed.
+
+### Changed
+
+- **The published-artefact check now states what it does not cover.** It reads
+  the image's dependency closure from the registry and never asks the container
+  to serve a request, so a stale build would satisfy it. That behavioural half
+  now runs in PublicAP's own CI, where a container runtime is already available,
+  and the README cross-references it. The split is what keeps each side cheap:
+  this repository verifies the claim its own page makes about the artefact's
+  contents, and the artefact's repository verifies that the artefact works.
+  Stating the boundary matters more than it sounds - a check whose limits are
+  unwritten gets trusted for things it never did.
+
+---
+
 ## v1.2.2 - 2026-08-12
 
 A documentation correction backed by a measurement. **Patch**: no framework
