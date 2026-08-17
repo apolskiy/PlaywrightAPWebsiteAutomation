@@ -9,10 +9,10 @@ overflow at either size.
 from __future__ import annotations
 
 import allure
+import pytest
 from playwright.sync_api import expect
 
 from pages.landing_page import LandingPage, NavigationTab
-import pytest
 
 EPIC_NAME = "Portfolio Website Quality"
 FEATURE_NAME = "Responsive Cross-Viewport Layout"

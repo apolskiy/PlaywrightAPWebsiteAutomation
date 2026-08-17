@@ -10,9 +10,9 @@ stays green, while a rule that drifts out of the shared selector list fails.
 from __future__ import annotations
 
 import allure
+import pytest
 
 from pages.landing_page import LandingPage, NavigationTab
-import pytest
 
 EPIC_NAME = "Portfolio Website Quality"
 FEATURE_NAME = "Interactive Link Styling"

@@ -15,9 +15,9 @@ what it thought of it.
 from __future__ import annotations
 
 import allure
+import pytest
 
 from pages.landing_page import LandingPage, NavigationTab
-import pytest
 
 EPIC_NAME = "Portfolio Website Quality"
 FEATURE_NAME = "Runtime Health Under Interaction"
