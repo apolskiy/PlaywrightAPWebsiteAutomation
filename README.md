@@ -324,8 +324,8 @@ Verified clean afterwards on every tab at 320px, 390px, and 600px, on both Chrom
 | `test_runtime_health.py` | 1 | Walking every tab in sequence leaves the browser's error log clean - the load-time checks below never exercise the router or the decoder, because neither runs until something is clicked |
 | `test_dynamic_routes.py` | 6 × routes | Per discovered route: HTTP 200, first-party console/network/JS error log, visible DOM root, a meta description within usable length bounds, desktop and mobile overflow |
 
-**72 tests on the deployment path, plus 2 that run weekly - 74 in total**, collected against the live site today (6 dynamic × 2 discovered routes) and growing automatically as pages are published and as navigation tabs are added.
+**78 tests on the deployment path, plus 2 that run weekly - 80 in total**, collected against the live site today (6 dynamic × 2 discovered routes) and growing automatically as pages are published and as navigation tabs are added.
 
-The deployment pipeline runs `pytest -m "not external"`, which is the 72, depending on nothing but this site. The two `external` tests reach third parties - one resolves outbound links, the other reads the published container image - and run weekly via `external-links.yml`, or on demand with `pytest -m external`.
+The deployment pipeline runs `pytest -m "not external"`, which is the 78, depending on nothing but this site. The two `external` tests reach third parties - one resolves outbound links, the other reads the published container image - and run weekly via `external-links.yml`, or on demand with `pytest -m external`.
 
 Three suites grow on their own, all from the same declaration. `test_navigation.py` parameterizes over `NavigationTab`, so publishing any tab adds a case; `test_project_panels.py` and `test_engineering_outcomes.py` parameterize over the subset of those tabs that describe a project, contributing four cases and one respectively. The counts above already include the VM Cluster Deployment tab, which added five of them without a test edit.

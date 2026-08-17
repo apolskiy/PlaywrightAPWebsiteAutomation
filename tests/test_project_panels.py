@@ -32,6 +32,7 @@ PROJECT_TABS: tuple[NavigationTab, ...] = (
     NavigationTab.WEB_AUTOMATION,
     NavigationTab.HTTP_EMULATORS,
     NavigationTab.VM_CLUSTER,
+    NavigationTab.TEST_INSIGHTS,
 )
 
 #: Accepted spellings of a README target, lower-cased before comparison. The

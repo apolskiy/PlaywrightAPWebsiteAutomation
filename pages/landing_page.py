@@ -164,6 +164,7 @@ class NavigationTab(Enum):
         "apvmcluster7",
         "VM Cluster Deployment",
     )
+    TEST_INSIGHTS = ("Test Insights", "apinsights8", "Test Insights")
 
     @property
     def label(self) -> str:

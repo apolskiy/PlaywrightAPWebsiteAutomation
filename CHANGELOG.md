@@ -49,6 +49,24 @@ in the evening in one timezone still agrees with the commit that carries it.
 - **`test_id` registered as a marker.** Required rather than cosmetic: this suite runs under `--strict-markers`, so an
   unregistered marker is an error, not a warning.
 
+- **Coverage of the site's new Test Insights tab, from one enum member.**
+  `NavigationTab.TEST_INSIGHTS` was added to `pages/landing_page.py`, and the
+  modules that parametrize over the tab list grew to cover it without a test
+  edit - panel completeness, documentation link, CI badge, cross-panel
+  repository agreement, hardened new-tab behaviour, and tab routing. The suite
+  went from **74 to 80 collected** (72 to 78 on the deployment path). Two
+  hand-maintained tuples did need extending, `PROJECT_TABS` and
+  `CITED_PROJECT_TABS`, which is the cost of their being explicit about what a
+  citation is allowed to open.
+
+### Changed
+
+- **Published suite-size figures updated** on the landing page and the case
+  study, from 72/74 to 78/80. Both are read back off the pages on every run and
+  compared against the executing suite, so this was not a change anyone could
+  have forgotten: the suite failed until the pages agreed with it. That is the
+  mechanism working, and it is worth recording as such rather than as a chore.
+
 ### Notes
 
 - No test was renamed and no behaviour changed. The diff is decorator
