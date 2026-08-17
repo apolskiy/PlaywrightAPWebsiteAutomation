@@ -12,11 +12,13 @@ import allure
 from playwright.sync_api import expect
 
 from pages.landing_page import LandingPage, NavigationTab
+import pytest
 
 EPIC_NAME = "Portfolio Website Quality"
 FEATURE_NAME = "Responsive Cross-Viewport Layout"
 
 
+@pytest.mark.test_id("PAWA_10035")
 @allure.epic(EPIC_NAME)
 @allure.feature(FEATURE_NAME)
 @allure.story("The desktop tab strip renders on a single row")
@@ -39,6 +41,7 @@ def test_desktop_navigation_renders_on_a_single_row(desktop_page: LandingPage) -
         )
 
 
+@pytest.mark.test_id("PAWA_10036")
 @allure.epic(EPIC_NAME)
 @allure.feature(FEATURE_NAME)
 @allure.story("The desktop skills matrix keeps its column headers")
@@ -55,6 +58,7 @@ def test_desktop_skills_matrix_shows_column_headers(desktop_page: LandingPage) -
         expect(landing_page.skills_matrix_header_row()).to_be_visible()
 
 
+@pytest.mark.test_id("PAWA_10037")
 @allure.epic(EPIC_NAME)
 @allure.feature(FEATURE_NAME)
 @allure.story("The desktop layout never scrolls sideways")
@@ -76,6 +80,7 @@ def test_desktop_layout_has_no_horizontal_overflow(desktop_page: LandingPage) ->
             )
 
 
+@pytest.mark.test_id("PAWA_10038")
 @allure.epic(EPIC_NAME)
 @allure.feature(FEATURE_NAME)
 @allure.story("The mobile tab strip wraps onto multiple rows")
@@ -98,6 +103,7 @@ def test_mobile_navigation_wraps_onto_multiple_rows(mobile_page: LandingPage) ->
         )
 
 
+@pytest.mark.test_id("PAWA_10039")
 @allure.epic(EPIC_NAME)
 @allure.feature(FEATURE_NAME)
 @allure.story("The mobile layout hides the redundant matrix headers")
@@ -117,6 +123,7 @@ def test_mobile_skills_matrix_hides_column_headers(mobile_page: LandingPage) -> 
         expect(landing_page.skills_matrix_header_row()).to_be_hidden()
 
 
+@pytest.mark.test_id("PAWA_10040")
 @allure.epic(EPIC_NAME)
 @allure.feature(FEATURE_NAME)
 @allure.story("The mobile layout never scrolls sideways")
@@ -138,6 +145,7 @@ def test_mobile_layout_has_no_horizontal_overflow(mobile_page: LandingPage) -> N
             )
 
 
+@pytest.mark.test_id("PAWA_10041")
 @allure.epic(EPIC_NAME)
 @allure.feature(FEATURE_NAME)
 @allure.story("The mobile profile header stacks without losing content")

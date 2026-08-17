@@ -17,6 +17,7 @@ EPIC_NAME = "Portfolio Website Quality"
 FEATURE_NAME = "Navigation and SPA Routing"
 
 
+@pytest.mark.test_id("PAWA_10021")
 @allure.epic(EPIC_NAME)
 @allure.feature(FEATURE_NAME)
 @allure.story("The landing page publishes the site owner's identity")
@@ -45,6 +46,7 @@ def test_landing_page_exposes_owner_identity(desktop_page: LandingPage) -> None:
         expect(landing_page.site_footer()).to_be_visible()
 
 
+@pytest.mark.test_id("PAWA_10022")
 @allure.epic(EPIC_NAME)
 @allure.feature(FEATURE_NAME)
 @allure.story("The profile portrait is a first-party asset that actually loads")
@@ -80,6 +82,7 @@ def test_profile_photo_is_self_hosted_and_renders(desktop_page: LandingPage) -> 
         )
 
 
+@pytest.mark.test_id("PAWA_10023")
 @allure.epic(EPIC_NAME)
 @allure.feature(FEATURE_NAME)
 @allure.story("Home is the default tab on first load")
@@ -99,6 +102,7 @@ def test_home_tab_is_selected_on_first_load(desktop_page: LandingPage) -> None:
         landing_page.expect_only_panel_visible(NavigationTab.HOME)
 
 
+@pytest.mark.test_id("PAWA_10024")
 @allure.epic(EPIC_NAME)
 @allure.feature(FEATURE_NAME)
 @allure.story("Each tab reveals exactly one content panel")
@@ -129,6 +133,7 @@ def test_activating_a_tab_reveals_only_its_panel(
         expect(landing_page.panel_heading(selected_tab)).to_be_visible()
 
 
+@pytest.mark.test_id("PAWA_10025")
 @allure.epic(EPIC_NAME)
 @allure.feature(FEATURE_NAME)
 @allure.story("Switching tabs clears the previously selected tab")
@@ -152,6 +157,7 @@ def test_switching_tabs_deselects_the_previous_tab(desktop_page: LandingPage) ->
         landing_page.expect_tab_not_selected(NavigationTab.WEB_AUTOMATION)
 
 
+@pytest.mark.test_id("PAWA_10026")
 @allure.epic(EPIC_NAME)
 @allure.feature(FEATURE_NAME)
 @allure.story("The profile header and footer persist across every tab")
@@ -172,6 +178,7 @@ def test_profile_header_and_footer_persist_across_tabs(desktop_page: LandingPage
             expect(landing_page.site_footer()).to_be_visible()
 
 
+@pytest.mark.test_id("PAWA_10027")
 @allure.epic(EPIC_NAME)
 @allure.feature(FEATURE_NAME)
 @allure.story("The Home panel renders the technical skills matrix")

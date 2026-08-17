@@ -40,6 +40,7 @@ PROJECT_TABS: tuple[NavigationTab, ...] = (
 README_SUFFIXES = ("readme.md",)
 
 
+@pytest.mark.test_id("PAWA_10028")
 @allure.epic(EPIC_NAME)
 @allure.feature(FEATURE_NAME)
 @allure.story("Every project panel links its own documentation")
@@ -85,6 +86,7 @@ def test_project_panel_publishes_a_documentation_link(
         )
 
 
+@pytest.mark.test_id("PAWA_10029")
 @allure.epic(EPIC_NAME)
 @allure.feature(FEATURE_NAME)
 @allure.story("Every project panel publishes a build-status badge")
@@ -138,6 +140,7 @@ def test_project_panel_publishes_a_ci_status_badge(
         )
 
 
+@pytest.mark.test_id("PAWA_10030")
 @allure.epic(EPIC_NAME)
 @allure.feature(FEATURE_NAME)
 @allure.story("Every row of a project panel names the same repository")
@@ -202,6 +205,7 @@ def test_project_panel_rows_agree_on_one_repository(
         )
 
 
+@pytest.mark.test_id("PAWA_10031")
 @allure.epic(EPIC_NAME)
 @allure.feature(FEATURE_NAME)
 @allure.story("Documentation links open in a new tab without leaking the opener")

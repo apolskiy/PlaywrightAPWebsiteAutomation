@@ -37,6 +37,7 @@ EXPECTED_DISTRIBUTIONS: frozenset[str] = frozenset(
 )
 
 
+@pytest.mark.test_id("PAWA_10032")
 @allure.epic(EPIC_NAME)
 @allure.feature(FEATURE_NAME)
 @allure.story("The published image installs only the dependencies the site claims")

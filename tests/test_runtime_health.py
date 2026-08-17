@@ -17,11 +17,13 @@ from __future__ import annotations
 import allure
 
 from pages.landing_page import LandingPage, NavigationTab
+import pytest
 
 EPIC_NAME = "Portfolio Website Quality"
 FEATURE_NAME = "Runtime Health Under Interaction"
 
 
+@pytest.mark.test_id("PAWA_10042")
 @allure.epic(EPIC_NAME)
 @allure.feature(FEATURE_NAME)
 @allure.story("Using every tab raises no error the browser can see")

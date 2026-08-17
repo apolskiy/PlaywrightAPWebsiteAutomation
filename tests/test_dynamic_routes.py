@@ -81,6 +81,7 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
         )
 
 
+@pytest.mark.test_id("PAWA_10001")
 @allure.epic(EPIC_NAME)
 @allure.feature(FEATURE_NAME)
 @allure.story("Every discovered route answers with HTTP 200")
@@ -105,6 +106,7 @@ def test_route_responds_with_http_200(
         )
 
 
+@pytest.mark.test_id("PAWA_10002")
 @allure.epic(EPIC_NAME)
 @allure.feature(FEATURE_NAME)
 @allure.story("Every discovered route loads without console or network errors")
@@ -175,6 +177,7 @@ def test_route_loads_without_console_or_network_errors(
         )
 
 
+@pytest.mark.test_id("PAWA_10003")
 @allure.epic(EPIC_NAME)
 @allure.feature(FEATURE_NAME)
 @allure.story("Every discovered route renders a visible DOM root")
@@ -201,6 +204,7 @@ def test_route_renders_a_visible_dom_root(
         )
 
 
+@pytest.mark.test_id("PAWA_10004")
 @allure.epic(EPIC_NAME)
 @allure.feature(FEATURE_NAME)
 @allure.story("Every discovered route publishes a usable meta description")
@@ -262,6 +266,7 @@ def test_route_publishes_a_meta_description(
         )
 
 
+@pytest.mark.test_id("PAWA_10005")
 @allure.epic(EPIC_NAME)
 @allure.feature(FEATURE_NAME)
 @allure.story("Every discovered route fits the desktop viewport")
@@ -285,6 +290,7 @@ def test_route_fits_the_desktop_viewport(
         )
 
 
+@pytest.mark.test_id("PAWA_10006")
 @allure.epic(EPIC_NAME)
 @allure.feature(FEATURE_NAME)
 @allure.story("Every discovered route fits the mobile viewport")

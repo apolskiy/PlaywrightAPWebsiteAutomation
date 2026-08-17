@@ -35,6 +35,7 @@ CITED_PROJECT_TABS: tuple[NavigationTab, ...] = (
 )
 
 
+@pytest.mark.test_id("PAWA_10007")
 @allure.epic(EPIC_NAME)
 @allure.feature(FEATURE_NAME)
 @allure.story("The outcomes tab publishes its table of claims")
@@ -62,6 +63,7 @@ def test_outcomes_tab_publishes_the_outcomes_table(desktop_page: LandingPage) ->
         )
 
 
+@pytest.mark.test_id("PAWA_10008")
 @allure.epic(EPIC_NAME)
 @allure.feature(FEATURE_NAME)
 @allure.story("Every claimed outcome cites a project it can be verified against")
@@ -95,6 +97,7 @@ def test_every_outcome_cites_at_least_one_project(desktop_page: LandingPage) -> 
         )
 
 
+@pytest.mark.test_id("PAWA_10009")
 @allure.epic(EPIC_NAME)
 @allure.feature(FEATURE_NAME)
 @allure.story("Following a citation opens the project tab it names")
@@ -128,6 +131,7 @@ def test_evidence_cross_reference_opens_its_project_tab(
         landing_page.expect_tab_not_selected(NavigationTab.ENGINEERING_OUTCOMES)
 
 
+@pytest.mark.test_id("PAWA_10010")
 @allure.epic(EPIC_NAME)
 @allure.feature(FEATURE_NAME)
 @allure.story("Emphasis inside an outcome does not fracture its sentence")
@@ -182,6 +186,7 @@ def test_only_the_leading_claim_is_promoted_to_its_own_line(
         assert not fractured, "Emphasis rendering is wrong:\n" + "\n".join(fractured)
 
 
+@pytest.mark.test_id("PAWA_10011")
 @allure.epic(EPIC_NAME)
 @allure.feature(FEATURE_NAME)
 @allure.story("Outcome rows share the site's row-hover treatment")
@@ -223,6 +228,7 @@ def test_outcome_rows_share_the_table_hover_color(desktop_page: LandingPage) -> 
         )
 
 
+@pytest.mark.test_id("PAWA_10012")
 @allure.epic(EPIC_NAME)
 @allure.feature(FEATURE_NAME)
 @allure.story("Citations are operable from the keyboard")

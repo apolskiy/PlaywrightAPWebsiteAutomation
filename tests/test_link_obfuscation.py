@@ -46,6 +46,7 @@ def is_safe_link_target(href: str) -> bool:
     return href.endswith(INTERNAL_PAGE_SUFFIXES)
 
 
+@pytest.mark.test_id("PAWA_10013")
 @allure.epic(EPIC_NAME)
 @allure.feature(FEATURE_NAME)
 @allure.story("Every obfuscated placeholder is replaced by a real anchor")
@@ -65,6 +66,7 @@ def test_all_placeholders_are_decoded_into_anchors(desktop_page: LandingPage) ->
         expect(landing_page.links.anchors().first).to_be_visible()
 
 
+@pytest.mark.test_id("PAWA_10014")
 @allure.epic(EPIC_NAME)
 @allure.feature(FEATURE_NAME)
 @allure.story("Decoded links resolve to absolute, safe URL schemes")
@@ -92,6 +94,7 @@ def test_decoded_links_use_absolute_safe_schemes(desktop_page: LandingPage) -> N
         )
 
 
+@pytest.mark.test_id("PAWA_10015")
 @allure.epic(EPIC_NAME)
 @allure.feature("Outbound Link Integrity")
 @allure.story("Every published repository link still resolves")
@@ -146,6 +149,7 @@ def test_outbound_links_do_not_rot(desktop_page: LandingPage) -> None:
         )
 
 
+@pytest.mark.test_id("PAWA_10016")
 @allure.epic(EPIC_NAME)
 @allure.feature(FEATURE_NAME)
 @allure.story("New-tab links are hardened against reverse tabnabbing")
@@ -171,6 +175,7 @@ def test_new_tab_links_declare_noopener_and_noreferrer(desktop_page: LandingPage
         )
 
 
+@pytest.mark.test_id("PAWA_10017")
 @allure.epic(EPIC_NAME)
 @allure.feature(FEATURE_NAME)
 @allure.story("The contact address is decoded without ever being displayed")
@@ -212,6 +217,7 @@ def test_contact_link_is_decoded_without_exposing_the_address(
         )
 
 
+@pytest.mark.test_id("PAWA_10018")
 @allure.epic(EPIC_NAME)
 @allure.feature(FEATURE_NAME)
 @allure.story("The copyright footer links the owner name to a decoded profile")
@@ -231,6 +237,7 @@ def test_copyright_footer_owner_name_is_a_decoded_link(desktop_page: LandingPage
         expect(landing_page.footer_owner_placeholder()).to_have_count(0)
 
 
+@pytest.mark.test_id("PAWA_10019")
 @allure.epic(EPIC_NAME)
 @allure.feature(FEATURE_NAME)
 @allure.story("Without scripting the payloads stay encoded and a fallback shows")

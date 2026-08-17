@@ -4,7 +4,7 @@ A production-grade E2E web automation and dynamic route-discovery framework buil
 
 Target Application: [https://apolskiy.github.io/](https://apolskiy.github.io/)
 
-> **Documentation status:** describes **v1.2.3**, reviewed 2026-08-12.
+> **Documentation status:** describes **v1.3.0**, reviewed 2026-08-16.
 > Each section below carries the release and date its content last changed, so a
 > reader arriving at a later version can see at a glance which parts moved. This
 > file always describes the *current* state; release-to-release history lives in
@@ -245,6 +245,38 @@ The error log is additionally published as a pytest report section, so it appear
 The diagnostics hook is strictly advisory. A missing credential, a network failure, or an API error is logged as a warning and degrades to "no report": it never converts a product failure into an infrastructure failure, and never masks the real Playwright error.
 
 ---
+
+## Test Identity
+
+<sub>v1.3.0 &middot; 2026-08-16</sub>
+
+Every test carries an assigned, stable identifier:
+
+```python
+@pytest.mark.test_id("PAWA_10001")
+def test_footer_owner_link_shares_the_table_hover_color(...) -> None:
+```
+
+IDs run from `PAWA_10001` and are **never reused** - deleting a test retires
+its number rather than freeing it. The suite currently occupies `PAWA_10001`
+to `PAWA_10042`; the next free identifier is `PAWA_10043`.
+
+The identifier exists because **a test's name is not a stable identity**. Any
+store keyed on the name forks a test's history the moment it is renamed, turning
+one test with a long record into two with short ones - silently, since both
+halves still look like valid tests. Names should stay free to improve, and this
+is what makes that free.
+
+`conftest.py` republishes the marker into both report formats at collection
+time, in `_publish_test_ids`: as an Allure label and as a JUnit `<property>`.
+Collection time rather than a fixture, so the label is attached before any
+reporter starts building a result and cannot be lost to fixture ordering.
+
+The consumer is
+[PortfolioTestInsights](https://github.com/apolskiy/PortfolioTestInsights),
+which keeps this suite's results past GitHub's 90-day artifact retention. It
+keys on `COALESCE(test_id, test_uid)`, so history recorded before the IDs
+existed still stitches to history recorded after.
 
 ## Static Analysis
 

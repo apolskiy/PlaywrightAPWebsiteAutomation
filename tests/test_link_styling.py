@@ -12,11 +12,13 @@ from __future__ import annotations
 import allure
 
 from pages.landing_page import LandingPage, NavigationTab
+import pytest
 
 EPIC_NAME = "Portfolio Website Quality"
 FEATURE_NAME = "Interactive Link Styling"
 
 
+@pytest.mark.test_id("PAWA_10020")
 @allure.epic(EPIC_NAME)
 @allure.feature(FEATURE_NAME)
 @allure.story("The copyright link shares the hover color used in the tables")

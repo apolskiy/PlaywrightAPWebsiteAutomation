@@ -228,6 +228,33 @@ SUITE_SIZE_REGISTRY = SuiteSizeRegistry()
 
 
 @pytest.hookimpl(tryfirst=True)
+def _publish_test_ids(items: list[pytest.Item]) -> None:
+    """Republish each test's assigned ID into every report format this suite emits.
+
+    The ID is authored once as ``@pytest.mark.test_id("PAWA_10001")`` and has to
+    reach two places that do not talk to each other: an Allure label, and a JUnit
+    ``<property>``. Doing it at collection time rather than in a fixture means the
+    label is attached before any reporter has begun building a result, so it
+    cannot be lost to fixture ordering.
+
+    The ID exists because a test's name is not a stable identity. Renaming a test
+    forks its history in any store keyed on the name, silently turning one test
+    with a long record into two with short ones. See
+    PortfolioTestInsights/DESIGN.md section 7.
+
+    Args:
+        items: Every collected item, annotated in place. Items carrying no
+            marker are left untouched.
+    """
+    for item in items:
+        marker = item.get_closest_marker("test_id")
+        if marker is None or not marker.args:
+            continue
+        test_id = str(marker.args[0])
+        item.user_properties.append(("test_id", test_id))
+        item.add_marker(allure.label("test_id", test_id))
+
+
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
     """Measure the suite before marker or keyword selection removes anything.
 
@@ -240,6 +267,8 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
         config: The active pytest configuration.
         items: Every collected item, before any deselection.
     """
+    _publish_test_ids(items)
+
     names_paths = any(
         str(argument).endswith(".py") or "::" in str(argument)
         for argument in config.invocation_params.args

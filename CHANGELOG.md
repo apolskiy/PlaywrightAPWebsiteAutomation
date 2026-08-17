@@ -23,6 +23,42 @@ in the evening in one timezone still agrees with the commit that carries it.
 
 ---
 
+## v1.3.0 - 2026-08-16
+
+### Added
+
+- **Every test now carries an assigned, stable identifier.** Forty-two tests are
+  marked `PAWA_10001` through `PAWA_10042` via `@pytest.mark.test_id(...)`;
+  the next free number is `PAWA_10043`, and numbers are never reused.
+
+  The identifier exists because a test's name is not a stable identity. Any
+  store keyed on the name forks a test's history the moment it is renamed -
+  silently, because both halves still look like valid tests, and the only
+  symptom is one long record quietly becoming two short ones. Names should stay
+  free to improve; this is what makes that free.
+
+  `conftest.py` republishes the marker at collection time in `_publish_test_ids`, as
+  both an Allure label and a JUnit `<property>`, so it is authored once and reaches two
+  reporters that do not talk to each other. Collection time rather than a fixture,
+  deliberately: the label is attached before any reporter begins building a result, so it
+  cannot be lost to fixture ordering.
+
+  Verified end to end - a single-test run produced an Allure result carrying
+  `PAWA_10020`, and collection still reports the full 74 items.
+
+- **`test_id` registered as a marker.** Required rather than cosmetic: this suite runs under `--strict-markers`, so an
+  unregistered marker is an error, not a warning.
+
+### Notes
+
+- No test was renamed and no behaviour changed. The diff is decorator
+  insertions plus the collection hook.
+- The identifier is additive for history: the collector keys on
+  `COALESCE(test_id, test_uid)`, so results recorded before these IDs existed -
+  including artifacts now expired - still stitch to results recorded after.
+
+---
+
 ## v1.2.3 - 2026-08-12
 
 A documentation clarification. **Patch**: no source, configuration or test

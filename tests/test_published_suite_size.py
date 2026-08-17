@@ -66,6 +66,7 @@ def _assert_matches(published: dict[str, int], suite_size: SuiteSize, page_name:
         )
 
 
+@pytest.mark.test_id("PAWA_10033")
 @allure.epic(EPIC_NAME)
 @allure.feature(FEATURE_NAME)
 @allure.story("The landing page quotes the suite size it actually has")
@@ -90,6 +91,7 @@ def test_landing_page_publishes_the_actual_suite_size(
     _assert_matches(published, suite_size, "The Web Automation tab")
 
 
+@pytest.mark.test_id("PAWA_10034")
 @allure.epic(EPIC_NAME)
 @allure.feature(FEATURE_NAME)
 @allure.story("The case study quotes the suite size it actually has")
