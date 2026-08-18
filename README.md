@@ -4,7 +4,7 @@ A production-grade E2E web automation and dynamic route-discovery framework buil
 
 Target Application: [https://apolskiy.github.io/](https://apolskiy.github.io/)
 
-> **Documentation status:** describes **v1.3.0**, reviewed 2026-08-16.
+> **Documentation status:** describes **v1.3.1**, reviewed 2026-08-18.
 > Each section below carries the release and date its content last changed, so a
 > reader arriving at a later version can see at a glance which parts moved. This
 > file always describes the *current* state; release-to-release history lives in
@@ -274,9 +274,16 @@ reporter starts building a result and cannot be lost to fixture ordering.
 
 The consumer is
 [PortfolioTestInsights](https://github.com/apolskiy/PortfolioTestInsights),
-which keeps this suite's results past GitHub's 90-day artifact retention. It
-keys on `COALESCE(test_id, test_uid)`, so history recorded before the IDs
-existed still stitches to history recorded after.
+which keeps this suite's results past GitHub's 90-day artifact retention. An ID
+observed anywhere for a test becomes that test's identity **everywhere**,
+including on rows recorded before the ID existed, so history from before the
+scheme stitches to history from after.
+
+Worth stating what that is not, because the obvious implementation is wrong and
+was tried first. Keying on `COALESCE(test_id, test_uid)` splits each test in two
+at the moment IDs arrive - every earlier row keyed by uid, every later row keyed
+by ID - producing two short histories where there was one long one, which is the
+precise failure these IDs exist to prevent.
 
 ## Static Analysis
 

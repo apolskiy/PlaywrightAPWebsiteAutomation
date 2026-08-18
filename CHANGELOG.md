@@ -23,6 +23,28 @@ in the evening in one timezone still agrees with the commit that carries it.
 
 ---
 
+## v1.3.1 - 2026-08-18
+
+### Fixed
+
+- **The Test Identity section described the stitching rule as
+  `COALESCE(test_id, test_uid)`, and called its consumer "the collector"
+  without naming it.** Both are corrected: the consumer is
+  [PortfolioTestInsights](https://github.com/apolskiy/PortfolioTestInsights),
+  and it does not use `COALESCE`, because `COALESCE` is the implementation that
+  breaks the guarantee these IDs were added to provide - it keys every pre-ID
+  row by uid and every post-ID row by ID, so one long history becomes two short
+  ones at exactly the moment the scheme starts working.
+
+  An ID observed anywhere for a test is now applied to every row for that test,
+  including rows recorded before the ID existed.
+
+  The v1.3.0 entry below is left as written. It recorded what was true on
+  2026-08-16, and a changelog that edits its own history stops being evidence of
+  anything.
+
+---
+
 ## v1.3.0 - 2026-08-16
 
 ### Added
