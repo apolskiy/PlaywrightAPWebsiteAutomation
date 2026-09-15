@@ -25,6 +25,12 @@ screenshots/
 .mypy_cache/
 .ruff_cache/
 
+# Claude Code - personal, machine-local settings.
+# Only the .local.json file: .claude/settings.json is the shared, committable
+# one, and .claude/rules/ and .claude/skills/ are project conventions that
+# belong in the repository.
+.claude/settings.local.json
+
 # OS
 .DS_Store
 Thumbs.db
