@@ -165,6 +165,7 @@ class NavigationTab(Enum):
         "VM Cluster Deployment",
     )
     TEST_INSIGHTS = ("Test Insights", "apinsights8", "Test Insights")
+    LLM_EVALUATION = ("Multi-LLM Evaluation", "apllmeval9", "Multi-LLM Evaluation")
 
     @property
     def label(self) -> str:
@@ -585,61 +586,94 @@ class LandingPage(BasePage):
         """
         return self.profile_header().get_by_role("link", name=soft_text_pattern("LinkedIn"))
 
-    def documentation_link(self, tab: NavigationTab) -> Locator:
-        """Locate the documentation link published by a project panel.
-
-        Each project table carries a ``Documentation`` row whose cell holds a
-        single decoded anchor pointing at that project's README. The row is
-        matched by its label rather than by position, so re-ordering the table
-        cannot silently retarget this locator.
-
-        Args:
-            tab: The project tab whose documentation link is wanted.
-
-        Returns:
-            A locator for the anchor inside the ``Documentation`` row.
-        """
-        documentation_row = (
-            self.tab_panel(tab)
-            .get_by_role("row")
-            .filter(has_text=soft_text_pattern(DOCUMENTATION_ROW_LABEL))
-        )
-        return documentation_row.get_by_role("link")
-
-    def repository_link(self, tab: NavigationTab) -> Locator:
-        """Locate the repository link published by a project panel.
-
-        Args:
-            tab: The project tab whose repository link is wanted.
-
-        Returns:
-            A locator for the anchor inside the ``Repo`` row.
-        """
-        repository_row = (
-            self.tab_panel(tab)
-            .get_by_role("row")
-            .filter(has_text=soft_text_pattern(REPOSITORY_ROW_LABEL))
-        )
-        return repository_row.get_by_role("link")
-
-    def ci_status_badge(self, tab: NavigationTab) -> Locator:
-        """Locate the CI status badge published by a project panel.
+    def project_row(self, tab: NavigationTab, row_label: str) -> Locator:
+        """Locate one labelled row of a project table.
 
         The row is matched by its label rather than by position, so re-ordering
-        a project table cannot silently retarget this locator.
+        a table cannot silently retarget a locator. The label is matched against
+        the row's first cell alone, and in full: matching it anywhere in the row
+        text would also select any row whose prose happens to use the word, and
+        a panel describing a design process says "documentation" in places that
+        are not its Documentation row.
 
         Args:
-            tab: The project tab whose build badge is wanted.
+            tab: The project tab whose table should be searched.
+            row_label: The label in the row's first cell, e.g. ``"Repo"``.
 
         Returns:
-            A locator for the badge image inside the CI status row.
+            A locator for the matching ``<tr>``.
         """
-        status_row = (
-            self.tab_panel(tab)
-            .get_by_role("row")
-            .filter(has_text=soft_text_pattern(CI_STATUS_ROW_LABEL))
+        label_pattern = re.compile(
+            rf"^\s*{soft_text_pattern(row_label).pattern}\s*$", re.IGNORECASE
         )
-        return status_row.locator("img.ci-badge")
+        return (
+            self.tab_panel(tab)
+            .locator("table.project-table > tbody > tr")
+            .filter(has=self.page.locator("td:first-child", has_text=label_pattern))
+        )
+
+    def documentation_link(self, tab: NavigationTab) -> Locator:
+        """Locate the documentation links published by a project panel.
+
+        Each project table carries a ``Documentation`` row holding one decoded
+        anchor per repository the panel describes, each pointing at that
+        repository's README.
+
+        Args:
+            tab: The project tab whose documentation links are wanted.
+
+        Returns:
+            A locator for the anchors inside the ``Documentation`` row.
+        """
+        return self.project_row(tab, DOCUMENTATION_ROW_LABEL).get_by_role("link")
+
+    def repository_link(self, tab: NavigationTab) -> Locator:
+        """Locate the repository links published by a project panel.
+
+        Args:
+            tab: The project tab whose repository links are wanted.
+
+        Returns:
+            A locator for the anchors inside the ``Repo`` row, one per
+            repository the panel describes.
+        """
+        return self.project_row(tab, REPOSITORY_ROW_LABEL).get_by_role("link")
+
+    def ci_status_badge(self, tab: NavigationTab) -> Locator:
+        """Locate the CI status badges published by a project panel.
+
+        Args:
+            tab: The project tab whose build badges are wanted.
+
+        Returns:
+            A locator for the badge images inside the CI status row. A panel
+            describing one repository carries one; a panel describing a chain of
+            workflows carries one per gate in it.
+        """
+        return self.project_row(tab, CI_STATUS_ROW_LABEL).locator("img.ci-badge")
+
+    def published_project_figures(self) -> list[tuple[str, str, int]]:
+        """Read every figure a project panel attributes to a repository's own README.
+
+        Some panels quote figures that belong to another repository's status
+        table - test counts, requirement counts - rather than to this site or
+        this suite. Those are marked up with the repository and the name of the
+        figure, so a test can read exactly what a reader sees and compare it
+        against the source it was copied from.
+
+        Returns:
+            One ``(repository, figure, value)`` triple per marked figure, in
+            document order, read from every panel whether or not it is shown.
+        """
+        return [
+            (str(repository), str(figure), int(text.strip()))
+            for repository, figure, text in self.page.eval_on_selector_all(
+                "span.qc-figure",
+                "nodes => nodes.map(node =>"
+                " [node.dataset.repository, node.dataset.figure, node.textContent])",
+            )
+            if repository and figure and text.strip().isdigit()
+        ]
 
     def panel_link(self, tab: NavigationTab) -> Locator:
         """Locate the first decoded link inside a tab's content panel.

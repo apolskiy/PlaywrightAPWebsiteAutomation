@@ -26,6 +26,8 @@ from urllib.parse import urldefrag, urljoin, urlparse, urlunparse
 
 from playwright.async_api import Error as PlaywrightError, Page, async_playwright
 
+from config.settings import FOREIGN_REPORT_PATH_PREFIXES
+
 LOGGER = logging.getLogger(__name__)
 
 #: Default location of the generated sitemap artifact.
@@ -242,7 +244,8 @@ class SiteMapCrawler:
 
         Relative paths (``/about``) and bare fragments (``#projects``) are
         resolved against the page they were found on. External hosts, non-HTTP
-        schemes, and asset files are rejected. Accepted URLs are canonicalized
+        schemes, asset files, and reports another project publishes on this
+        host are rejected. Accepted URLs are canonicalized
         so that spellings of the same document - notably an empty path versus
         ``/``, which this site links to itself both ways - collapse to one route
         instead of being crawled and reported twice.
@@ -266,7 +269,12 @@ class SiteMapCrawler:
         parsed_url = urlparse(urljoin(current_url, href))
         if parsed_url.scheme.lower() not in {"http", "https"}:
             return None
-        if parsed_url.netloc.lower() != self._base_host.lower():
+        # A report another project publishes on this host is the same host but
+        # a different author, so it is out of scope like any external host: see
+        # FOREIGN_REPORT_PATH_PREFIXES.
+        if parsed_url.netloc.lower() != self._base_host.lower() or parsed_url.path.startswith(
+            FOREIGN_REPORT_PATH_PREFIXES
+        ):
             return None
         if Path(parsed_url.path).suffix.lower() in NON_HTML_EXTENSIONS:
             return None

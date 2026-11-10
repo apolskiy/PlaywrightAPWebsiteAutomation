@@ -23,6 +23,48 @@ in the evening in one timezone still agrees with the commit that carries it.
 
 ---
 
+## v1.4.0 - 2026-11-10
+
+### Added
+
+- **Coverage for the Multi-LLM Evaluation tab.** `NavigationTab.LLM_EVALUATION`
+  (`apllmeval9`) joins the enum, so every suite parametrized over the tabs or
+  over the project tabs covers it without a test edit: six new cases on the
+  deployment path. The tab is also a valid Evidence citation target.
+- **`PAWA_10043`, figures quoted from another repository match their source.**
+  The tab quotes test, requirement and recording counts that belong to
+  AP-Harness-QC and AP-Model-QC. Each is marked up with its repository and
+  figure name, and the test compares it against the Status table of that
+  repository's README on `main` (`utils/readme_figures.py`). A README that no
+  longer states a figure fails as well, since the page would then be quoting a
+  number with no source. Marked `external` and run weekly: it reads
+  raw.githubusercontent.com, and a README drifts over weeks, not between pushes.
+  Verified by mutation: a figure changed on the page fails with both values named.
+
+### Changed
+
+- **The panel tests check the repositories each tab declares, not exactly one.**
+  The Multi-LLM Evaluation project is deliberately split into a harness and its
+  cases, and its panel describes both. `PROJECT_REPOSITORIES` in
+  `tests/test_project_panels.py` declares each tab's repositories; the
+  Documentation and Repo rows must name exactly those, in order, and every badge
+  must report one of them, with each reporting at least one. The guard the old
+  rule existed for still holds, and was re-verified by pointing one badge at a
+  sibling repository: the test names the stray repository.
+  `test_project_panel_rows_agree_on_one_repository` is renamed
+  `..._agree_on_its_repositories`; its ID, `PAWA_10030`, is unchanged, so its
+  history stitches across the rename.
+- **Row locators match the label cell, not the row text.** `project_row` matches
+  the first cell in full. Matching anywhere in the row would also select any row
+  whose prose used the word, and a panel describing a design process says
+  "documentation" well away from its Documentation row.
+- **Reports other projects publish on this host are not crawled.**
+  `FOREIGN_REPORT_PATH_PREFIXES` lists the AP-Harness-QC and AP-Model-QC Allure
+  reports, which GitHub Pages serves from this same host. They carry none of
+  this site's page contract, so crawling them would fail a deploy over documents
+  this site never wrote. The link auditor treats them as outbound targets, so
+  the weekly link check still resolves them.
+
 ## v1.3.1 - 2026-08-18
 
 ### Fixed

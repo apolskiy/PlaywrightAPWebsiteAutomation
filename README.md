@@ -60,6 +60,7 @@ PlaywrightAPWebsiteAutomation/
 │   ├── claude_inspector.py        # Claude API failure triage helper
 │   ├── link_auditor.py            # Outbound link collection, classification, and resolution
 │   ├── page_diagnostics.py        # Console/network/JS error recording, split by origin
+│   ├── readme_figures.py          # Stdlib reader for figures another repository's README states
 │   ├── registry_client.py         # Stdlib Docker registry reader for published-image audits
 │   ├── site_crawler.py            # Async sitemap crawler and route discovery engine
 │   └── visual_comparator.py       # Pillow threshold image-diff helper (available; no test uses it yet)
@@ -72,6 +73,7 @@ PlaywrightAPWebsiteAutomation/
 │   ├── test_engineering_outcomes.py  # Outcomes table and its cross-tab citations
 │   ├── test_project_panels.py     # Per-project panel completeness and repository agreement
 │   ├── test_published_image_claims.py  # Published container matches the claim on the page
+│   ├── test_published_project_figures.py  # Figures quoted from other repos match their READMEs
 │   ├── test_published_suite_size.py    # Suite-size figures on the site match the real suite
 │   ├── test_runtime_health.py     # Browser error log after the page has been used, not just loaded
 │   └── test_dynamic_routes.py     # Health checks generated per discovered route
@@ -259,7 +261,7 @@ def test_footer_owner_link_shares_the_table_hover_color(...) -> None:
 
 IDs run from `PAWA_10001` and are **never reused** - deleting a test retires
 its number rather than freeing it. The suite currently occupies `PAWA_10001`
-to `PAWA_10042`; the next free identifier is `PAWA_10043`.
+to `PAWA_10043`; the next free identifier is `PAWA_10044`.
 
 The identifier exists because **a test's name is not a stable identity**. Any
 store keyed on the name forks a test's history the moment it is renamed, turning
@@ -316,23 +318,26 @@ Verified clean afterwards on every tab at 320px, 390px, and 600px, on both Chrom
 
 ## Coverage Summary
 
-<sub>v1.2.0 &middot; 2026-08-12</sub>
+<sub>v1.4.0 &middot; 2026-11-10</sub>
 
 | Suite | Scenarios | Focus |
 | --- | --- | --- |
-| `test_navigation.py` | 13 | Title, profile header, self-hosted portrait, footer, default tab, per-tab panel exclusivity (one case per tab), tab deselection, persistent chrome, skills matrix |
-| `test_engineering_outcomes.py` | 10 | Outcomes table renders, every claim cites a project, each citation opens the tab it names (one case per project), emphasis rendering does not fracture a sentence, row-hover parity, keyboard activation |
+| `test_navigation.py` | 15 | Title, profile header, self-hosted portrait, footer, default tab, per-tab panel exclusivity (one case per tab), tab deselection, persistent chrome, skills matrix |
+| `test_engineering_outcomes.py` | 12 | Outcomes table renders, every claim cites a project, each citation opens the tab it names (one case per project), emphasis rendering does not fracture a sentence, row-hover parity, keyboard activation |
 | `test_responsive.py` | 7 | Tab-strip wrapping, header suppression below the breakpoint, horizontal overflow on both viewports (every tab checked inside each case), stacked profile header |
 | `test_link_obfuscation.py` | 7 | Placeholder decoding, safe URL schemes, outbound link-rot detection, `noopener noreferrer` hardening, address never rendered as text, copyright owner link, `noscript` fallback |
 | `test_link_styling.py` | 1 | Copyright link shares the table hover color, and hovering visibly changes it |
-| `test_project_panels.py` | 20 | Per project panel: a Documentation row linking that project's README, decoded to an absolute target and opening in a hardened new tab; a CI badge sourced from that project's own repository and carrying alt text; and the repository row, badge source and README target all reduced to `owner/name` and required to agree |
+| `test_project_panels.py` | 28 | Per project panel, held to the repositories it declares (one for most projects, two for Multi-LLM Evaluation): one README link per repository, decoded to an absolute target and opening in a hardened new tab; at least one CI badge per repository, each sourced from this account and carrying alt text; and the repository, documentation and badge rows reduced to `owner/name` and required to name exactly the declared repositories |
 | `test_published_image_claims.py` | 1 | The published `apolskiy/flask_app` image installs Flask's dependency closure and nothing beyond it |
+| `test_published_project_figures.py` | 1 | Every figure the Multi-LLM Evaluation tab quotes from another repository matches the Status table of that repository's README |
 | `test_published_suite_size.py` | 2 | The suite-size figures quoted on the Web Automation tab and in the CI case study match the suite that is running |
 | `test_runtime_health.py` | 1 | Walking every tab in sequence leaves the browser's error log clean - the load-time checks below never exercise the router or the decoder, because neither runs until something is clicked |
 | `test_dynamic_routes.py` | 6 × routes | Per discovered route: HTTP 200, first-party console/network/JS error log, visible DOM root, a meta description within usable length bounds, desktop and mobile overflow |
 
-**78 tests on the deployment path, plus 2 that run weekly - 80 in total**, collected against the live site today (6 dynamic × 2 discovered routes) and growing automatically as pages are published and as navigation tabs are added.
+**90 tests on the deployment path, plus 3 that run weekly - 93 in total**, collected against the live site today (6 dynamic × 3 discovered routes) and growing automatically as pages are published and as navigation tabs are added.
 
-The deployment pipeline runs `pytest -m "not external"`, which is the 78, depending on nothing but this site. The two `external` tests reach third parties - one resolves outbound links, the other reads the published container image - and run weekly via `external-links.yml`, or on demand with `pytest -m external`.
+The deployment pipeline runs `pytest -m "not external"`, which is the 90, depending on nothing but this site. The three `external` tests reach third parties - one resolves outbound links, one reads the published container image, and one reads the READMEs whose figures the Multi-LLM Evaluation tab quotes - and run weekly via `external-links.yml`, or on demand with `pytest -m external`.
 
-Three suites grow on their own, all from the same declaration. `test_navigation.py` parameterizes over `NavigationTab`, so publishing any tab adds a case; `test_project_panels.py` and `test_engineering_outcomes.py` parameterize over the subset of those tabs that describe a project, contributing four cases and one respectively. The counts above already include the VM Cluster Deployment tab, which added five of them without a test edit.
+Three suites grow on their own, all from the same declaration. `test_navigation.py` parameterizes over `NavigationTab`, so publishing any tab adds a case; `test_project_panels.py` and `test_engineering_outcomes.py` parameterize over the subset of those tabs that describe a project, contributing four cases and one respectively. The Multi-LLM Evaluation tab added six this way; its only test edit was declaring the two repositories it describes.
+
+**Reports on this host that are not this site.** GitHub Pages serves every repository of the account from `apolskiy.github.io`, so the Allure reports AP-Harness-QC and AP-Model-QC publish look internal by URL. They are generated by those projects, carry none of this site's page contract, and are listed in `FOREIGN_REPORT_PATH_PREFIXES` (`config/settings.py`): the crawler does not follow them, and the weekly link check resolves them as outbound targets instead, so they are checked rather than ignored. The Test Insights report is deliberately not listed; it is written for this site and crawled like any page.

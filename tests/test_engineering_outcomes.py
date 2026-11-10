@@ -33,6 +33,7 @@ CITED_PROJECT_TABS: tuple[NavigationTab, ...] = (
     NavigationTab.HTTP_EMULATORS,
     NavigationTab.VM_CLUSTER,
     NavigationTab.TEST_INSIGHTS,
+    NavigationTab.LLM_EVALUATION,
 )
 
 

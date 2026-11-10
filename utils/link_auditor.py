@@ -22,6 +22,8 @@ from urllib.parse import urlparse
 
 from playwright.sync_api import Error as PlaywrightError, Locator, Page
 
+from config.settings import FOREIGN_REPORT_PATH_PREFIXES
+
 #: Minimum gap between consecutive requests to the same host, in seconds.
 #: Resolving one host's links back-to-back is enough to trip its rate limiter.
 OUTBOUND_REQUEST_INTERVAL_SECONDS: Final[float] = 0.4
@@ -86,15 +88,21 @@ class LinkAuditor:
 
         Returns:
             Unique absolute targets whose host differs from the application's
-            own, in first-seen order. Internal page links and ``mailto:`` are
-            excluded: neither can rot in a way an HTTP status would reveal.
+            own, in first-seen order, plus the reports other projects publish on
+            this same host, which the crawler deliberately leaves alone and which
+            would otherwise be checked by nothing. Internal page links and
+            ``mailto:`` are excluded: the crawler covers the first, and neither
+            can rot in a way an HTTP status would reveal.
         """
         own_host = urlparse(self._base_url).netloc
         seen: dict[str, None] = {}
         for href in self.published_hrefs():
             if not href.startswith("https://"):
                 continue
-            if urlparse(href).netloc == own_host:
+            parsed_href = urlparse(href)
+            if parsed_href.netloc == own_host and not parsed_href.path.startswith(
+                FOREIGN_REPORT_PATH_PREFIXES
+            ):
                 continue
             seen.setdefault(href, None)
         return list(seen)
