@@ -1,21 +1,32 @@
-"""Reading the figures another repository's README states about itself.
+"""Reads the figures another repository's README states about itself.
 
-The Multi-LLM Evaluation tab quotes test, requirement and recording counts that
-belong to two other repositories. Those numbers change whenever that project
-moves, and nothing on this site would notice: the tab keeps rendering, and the
-figure keeps looking like a figure. So each one is marked up with its source,
-and this module reads the source - the Status table at the top of that
-repository's README, which is where the project states its own numbers - so a
-test can compare the two.
+Created: 2026-11-10
+Last updated: 2026-11-10
 
-Each figure is located by a pattern written against the README's own wording.
-That is deliberate rather than fragile: if the README stops stating a figure in
-a recognisable form, the site is quoting a number its source no longer states,
-and that should fail rather than pass silently.
+This file contains ``readme_url`` and ``fetch_readme``, which locate and
+download a repository's README; ``stated_figure``, which finds the integer a
+README states for one named figure; and ``FIGURE_PATTERNS``, the pattern that
+finds each figure, keyed by repository and figure name.
 
-Raw README content is read from ``raw.githubusercontent.com`` with the standard
-library, the same way the registry check reads its manifests, so no HTTP client
-is added for it.
+``test_published_project_figures.py`` reads every figure the Multi-LLM
+Evaluation tab marks up with its source, fetches that source's README through
+this module and compares the two. It runs in the weekly ``external`` check,
+since it reaches GitHub, so a failure here reports a quoted figure gone stale
+and never decides a deploy.
+
+**The source is the README's Status table**, where each project states its own
+numbers, read from ``main``. Those numbers move whenever that project does, and
+nothing on this site would otherwise notice.
+
+**Each figure is found by a pattern written against the README's wording.**
+That is deliberate, not fragile: a README that stops stating a figure in a
+recognizable form leaves the site quoting a number its source no longer states,
+and that fails rather than passing silently.
+
+**Only the standard library is used**, reading ``raw.githubusercontent.com``
+the same way the registry check reads its manifests, so no HTTP client is added.
+
+Specified by ``README.md`` section "Coverage Summary".
 """
 
 from __future__ import annotations
@@ -24,17 +35,17 @@ import re
 import urllib.request
 from typing import Final
 
-#: Account that owns every repository whose figures the site quotes.
+#: OWNER of every repository whose figures the site quotes.
 OWNER: Final[str] = "apolskiy"
 
-#: Branch whose README is the source of truth.
+#: SOURCE OF TRUTH. The branch whose README is read.
 BRANCH: Final[str] = "main"
 
-#: Ceiling on a single README fetch, in seconds.
+#: BOUNDED. The ceiling of one README fetch, in seconds.
 REQUEST_TIMEOUT_SECONDS: Final[float] = 20.0
 
-#: Where each marked figure is stated, keyed by ``(repository, figure)``. Each
-#: pattern captures exactly one integer from the repository's README.
+#: ONE PATTERN PER FIGURE, keyed by ``(repository, figure)``. Each captures
+#: exactly one integer from that repository's README.
 FIGURE_PATTERNS: Final[dict[tuple[str, str], re.Pattern[str]]] = {
     ("AP-Harness-QC", "suite-cases"): re.compile(r"\*\*(\d+) test cases, all passing\*\*"),
     ("AP-Harness-QC", "requirements"): re.compile(r"\|\s*Requirements traced\s*\|\s*(\d+)"),
@@ -56,25 +67,29 @@ FIGURE_PATTERNS: Final[dict[tuple[str, str], re.Pattern[str]]] = {
 
 
 def readme_url(repository: str) -> str:
-    """Build the raw-content URL of a repository's README.
+    """Return the raw-content URL of a repository's README.
 
     Args:
-        repository: Repository name under :data:`OWNER`, e.g. ``"AP-Model-QC"``.
+        repository (str): The repository name under :data:`OWNER`, for example
+            ``"AP-Model-QC"``.
 
     Returns:
-        The absolute URL of the README on :data:`BRANCH`.
+        str: The absolute URL of the README on :data:`BRANCH`.
     """
     return f"https://raw.githubusercontent.com/{OWNER}/{repository}/{BRANCH}/README.md"
 
 
 def fetch_readme(repository: str) -> str:
-    """Download a repository's README as text.
+    """Return a repository's README, downloaded as text.
 
     Args:
-        repository: Repository name under :data:`OWNER`.
+        repository (str): The repository name under :data:`OWNER`.
 
     Returns:
-        The README's Markdown source.
+        str: The README's Markdown source.
+
+    Raises:
+        urllib.error.URLError: When the README cannot be fetched.
     """
     request = urllib.request.Request(readme_url(repository))
     with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
@@ -82,19 +97,19 @@ def fetch_readme(repository: str) -> str:
 
 
 def stated_figure(readme: str, repository: str, figure: str) -> int | None:
-    """Find the value a README states for one figure.
+    """Return the value a README states for one figure.
 
     Args:
-        readme: The README's Markdown source.
-        repository: Repository the README belongs to.
-        figure: Name of the figure, as the site marks it up.
+        readme (str): The README's Markdown source.
+        repository (str): The repository the README belongs to.
+        figure (str): The figure's name, as the site marks it up.
 
     Returns:
-        The integer the README states, or ``None`` when the README no longer
+        int | None: The integer the README states, or None when it no longer
         states it in the form the pattern expects.
 
     Raises:
-        KeyError: When no pattern is known for the figure, which means the site
+        KeyError: When no pattern is known for the figure, meaning the site
             marked up a figure nothing knows how to verify.
     """
     match = FIGURE_PATTERNS[(repository, figure)].search(readme)

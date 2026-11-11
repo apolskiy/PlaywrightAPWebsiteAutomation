@@ -1,15 +1,31 @@
-"""Runtime health of the landing page while it is being used, not just loaded.
+"""Tests that using the landing page, not just loading it, leaves the browser log clean.
 
-``tests/test_dynamic_routes.py`` already checks every discovered route for a
-clean browser log, but it checks it at rest: navigate, read the log, done. That
-covers the load path and nothing else, which leaves the site's only scripted
-behaviour - the tab router and the base64 link decoder - unwatched. An exception
-thrown when a tab is clicked breaks the page for a visitor while every existing
-check stays green, because each one asserts on a locator that simply never
-resolves and reports a timeout that says nothing about the cause.
+Created: 2026-08-11
+Last updated: 2026-11-10
 
-This module drives the page the way a visitor does and then asks the browser
-what it thought of it.
+This file covers one behavior: visiting every tab in navigation order, then
+letting sub-resources settle, leaves no unhandled JavaScript exception, no
+first-party console error, no first-party request failed at the network level,
+and no first-party sub-resource with an error status.
+
+The case runs on the deployment path. ``tests/test_dynamic_routes.py`` reads
+each route's log at rest, after load only, which never runs the site's scripted
+behavior, the tab router and the base64 link decoder. A failure here means one
+of the two raised or broke a request while a visitor used the page, which other
+checks would surface only as a locator timeout naming no cause.
+
+**One walk, not one case per tab.** The router is a state machine over a shared
+page, and its likely failures need a sequence: a listener bound twice, a panel
+left visible, a decoder running again over decoded markup. A per-tab case that
+reloads between clicks would reset the state that produces them.
+
+**Only first-party network problems fail the case.** Third-party ones, such as
+the GitHub badge images revealed with each panel, are recorded and reported but
+are not the verdict. When sub-resources have not settled, the failure message
+says the list may be incomplete.
+
+Specified by ``README.md`` sections "Key Features" (The Browser's Own Error Log,
+on Every Page; Origin-Scoped Assertions) and "Coverage Summary".
 """
 
 from __future__ import annotations
@@ -29,23 +45,17 @@ FEATURE_NAME = "Runtime Health Under Interaction"
 @allure.story("Using every tab raises no error the browser can see")
 @allure.severity(allure.severity_level.CRITICAL)
 def test_visiting_every_tab_raises_no_browser_errors(desktop_page: LandingPage) -> None:
-    """Walking the whole tab strip must leave the browser's error log clean.
+    """Assert walking the whole tab strip leaves the browser's error log clean.
 
-    The walk is one test rather than one per tab on purpose. The router is a
-    state machine over a shared page: the interesting failures are the ones that
-    need a *sequence* - a listener bound twice, a panel left visible, a decoder
-    that runs a second time over already-decoded markup - and a per-tab test
-    that reloads between clicks would reset the very state that produces them.
-
-    Network assertions are scoped to the site's own origin. Every project panel
-    embeds a CI badge served by GitHub, and those images are fetched as the
-    panels are revealed, so an unscoped assertion would make this test - and the
-    deployment signal it feeds - depend on GitHub being reachable. Third-party
-    problems are recorded and reported all the same; they are just not the
-    verdict.
+    Asserts no JavaScript exception at all, and no console error, failed
+    request or error-status sub-resource from the site's own origin. The full
+    log, third-party events included, is attached to the report.
 
     Args:
-        desktop_page: Landing Page Object at the 1920x1080 viewport.
+        desktop_page (LandingPage): The landing Page Object at 1920x1080.
+
+    Returns:
+        None
     """
     landing_page = desktop_page.navigate()
 

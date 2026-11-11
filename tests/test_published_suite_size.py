@@ -1,22 +1,25 @@
-"""Coverage for the suite-size figures the site quotes to a reader.
+"""Tests that the suite-size figures the site quotes match the suite that is running.
 
-The site states how many tests this suite runs, on the Web Automation tab and
-again in the CI case study. Those numbers were maintained by hand, which is a
-guarantee that they eventually stop being true: a test is added, the pipeline
-still passes, and the page keeps advertising last month's figure with nothing
-anywhere to notice.
+Created: 2026-08-03
+Last updated: 2026-11-10
 
-The numbers stay written in the markup - a reader should see a number, not a
-placeholder - but they are no longer trusted. Each figure is marked up so it can
-be read back and compared against the suite that is running, so the claim fails
-the build the moment it drifts instead of decaying quietly.
+This file covers two behaviors: the Web Automation tab and the CI case study
+each quote the collected total and the deployment-path count of this suite. The
+private ``_assert_matches`` helper holds the three assertions both cases share,
+and ``CASE_STUDY_ROUTE`` names the second page.
 
-The counts come from collection rather than from the current selection, so
-running a subset does not make the published figure look wrong. Two invocations
-measure something other than the suite the site quotes - naming specific files,
-and selecting more than one browser engine, since every browser-scoped test is
-collected once per engine. Both skip rather than assert against a number that
-was never describing that run.
+The cases run on the deployment path and read their expected figures from the
+``suite_size`` fixture, which ``conftest.py`` measures during collection. A
+failure means a page advertises a suite size the suite no longer has, or
+carries no marked figure to verify; the fix is to the page, not to this file.
+
+**Counts come from collection, not from the current selection**, so running a
+subset never makes the figure look wrong. A run that names specific files or
+selects more than one browser engine measures something the figure never
+described, and both cases skip with the fixture's reason instead of asserting.
+
+Specified by ``README.md`` sections "Key Features" (Published Figures Verify
+Themselves) and "Quick Start".
 """
 
 from __future__ import annotations
@@ -32,17 +35,25 @@ from pages.route_page import RoutePage
 EPIC_NAME = "Portfolio Website Quality"
 FEATURE_NAME = "Published Suite Size"
 
-#: Route of the case study, which quotes the same figures as the landing page.
+#: SECOND QUOTING PAGE. The case study's route, which quotes the same figures
+#: as the landing page.
 CASE_STUDY_ROUTE = "case-study.html"
 
 
 def _assert_matches(published: dict[str, int], suite_size: SuiteSize, page_name: str) -> None:
-    """Compare the figures a page publishes against the collected suite.
+    """Assert the figures a page publishes match the collected suite.
+
+    The page must publish at least one marked figure, its ``total`` must equal
+    the collected total, and its ``deploy`` must equal the count not marked
+    ``external``.
 
     Args:
-        published: Scope-to-number mapping read from the page.
-        suite_size: The suite size measured during collection.
-        page_name: Human-readable page name used in failure messages.
+        published (dict[str, int]): The scope-to-number mapping read from the page.
+        suite_size (SuiteSize): The suite size measured during collection.
+        page_name (str): The page's name as failure messages show it.
+
+    Returns:
+        None
     """
     with allure.step(f"Verify {page_name} publishes a suite size at all"):
         assert published, (
@@ -74,11 +85,16 @@ def _assert_matches(published: dict[str, int], suite_size: SuiteSize, page_name:
 def test_landing_page_publishes_the_actual_suite_size(
     desktop_page: LandingPage, suite_size: SuiteSize
 ) -> None:
-    """The Web Automation tab must quote the collected suite size.
+    """Assert the Web Automation tab quotes the collected suite size.
+
+    Skips when the run is not comparable with the published figure.
 
     Args:
-        desktop_page: Landing Page Object at the 1920x1080 viewport.
-        suite_size: Suite size measured during collection.
+        desktop_page (LandingPage): The landing Page Object at 1920x1080.
+        suite_size (SuiteSize): The suite size measured during collection.
+
+    Returns:
+        None
     """
     if suite_size.incomparable_reason is not None:
         pytest.skip(suite_size.incomparable_reason)
@@ -101,12 +117,17 @@ def test_case_study_publishes_the_actual_suite_size(
     framework_settings: Settings,
     suite_size: SuiteSize,
 ) -> None:
-    """The case study's cost table must quote the collected suite size.
+    """Assert the case study's cost table quotes the collected suite size.
+
+    Skips when the run is not comparable with the published figure.
 
     Args:
-        desktop_route_page: Route Page Object at the 1920x1080 viewport.
-        framework_settings: Resolved framework configuration.
-        suite_size: Suite size measured during collection.
+        desktop_route_page (RoutePage): The route Page Object at 1920x1080.
+        framework_settings (Settings): The resolved framework configuration.
+        suite_size (SuiteSize): The suite size measured during collection.
+
+    Returns:
+        None
     """
     if suite_size.incomparable_reason is not None:
         pytest.skip(suite_size.incomparable_reason)

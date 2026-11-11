@@ -1,16 +1,38 @@
-"""Coverage for the Engineering Outcomes tab and its cross-references.
+"""Tests for the Engineering Outcomes tab and the citations in it.
 
-The tab publishes one row per claimed outcome, each citing the project or
-projects it can be verified against. Two properties matter here and neither is
-covered by the navigation suite: every claim must carry at least one citation,
-and following a citation must actually open the project it names.
+Created: 2026-07-29
+Last updated: 2026-11-10
 
-The citations are deliberately not anchors. They navigate within this
-single-page application, and :mod:`tests.test_link_obfuscation` requires every
-anchor on the site to resolve to an absolute ``https``/``mailto`` target, so a
-same-page fragment would violate that contract. They are published as elements
-carrying a button role instead, which is why keyboard activation is asserted
-separately - a pointer must not be the only way to reach a project.
+This file contains the tests that the tab publishes a non-empty outcomes table;
+that every outcome row cites at least one project; that following a citation
+opens the project tab it names, one case per entry of ``CITED_PROJECT_TABS``;
+that only a row's leading claim renders as a block; that outcome rows share the
+site's row-hover color; and that a citation activates from the keyboard.
+
+They run on the deployment path at the desktop viewport. A failure means the
+tab's promise that each claim is verifiable in source no longer holds: a claim
+cites nothing, a citation sends the reader to the wrong project, or the table
+renders in a way that breaks its prose or its operability.
+
+**Citations are buttons, not anchors.** They navigate inside this single-page
+application, and :mod:`tests.test_link_obfuscation` requires every anchor on
+the site to resolve to an absolute ``https`` or ``mailto`` target, which a
+same-page fragment would violate. They carry a button role instead, so keyboard
+activation is asserted on its own: a pointer must not be the only way in.
+
+**Only the leading claim is lifted onto its own line.** The stylesheet promotes
+each row's opening bold claim to a block, which makes the table scannable, and
+emphasis later in the sentence must stay inline. The case was added 2026-07-30
+as a regression guard: the rule was first written against every ``<strong>``
+in the cell, which was harmless until a row emphasized a figure mid-prose and
+split the sentence, and the damage was visible only on the rendered page.
+
+**Hover is compared against another table, not a fixed color**, so a re-theme
+that changes the color everywhere stays green while a rule that leaves the
+shared selector list fails.
+
+Specified by ``README.md`` sections "Key Features" (Evidence-Integrity Checks)
+and "Coverage Summary".
 """
 
 from __future__ import annotations
@@ -24,8 +46,9 @@ from pages.landing_page import LandingPage, NavigationTab
 EPIC_NAME = "Portfolio Website Quality"
 FEATURE_NAME = "Engineering Outcomes and Evidence"
 
-#: The tabs an Evidence citation is allowed to open. Home and the outcomes tab
-#: itself are excluded: a citation points at a project, never back at the index.
+#: CITABLE TABS. The tabs an Evidence citation may open, one case each. Home
+#: and the outcomes tab are excluded: a citation points at a project, never
+#: back at the index.
 CITED_PROJECT_TABS: tuple[NavigationTab, ...] = (
     NavigationTab.REST_API,
     NavigationTab.PORTFOLIO_WEBSITE,
@@ -43,10 +66,13 @@ CITED_PROJECT_TABS: tuple[NavigationTab, ...] = (
 @allure.story("The outcomes tab publishes its table of claims")
 @allure.severity(allure.severity_level.CRITICAL)
 def test_outcomes_tab_publishes_the_outcomes_table(desktop_page: LandingPage) -> None:
-    """Opening the tab must reveal the outcomes table with at least one row.
+    """Assert opening the tab reveals the outcomes table with at least one row.
 
     Args:
-        desktop_page: Landing Page Object at the 1920x1080 viewport.
+        desktop_page (LandingPage): The landing Page Object at 1920x1080.
+
+    Returns:
+        None
     """
     landing_page = desktop_page.navigate()
 
@@ -71,14 +97,16 @@ def test_outcomes_tab_publishes_the_outcomes_table(desktop_page: LandingPage) ->
 @allure.story("Every claimed outcome cites a project it can be verified against")
 @allure.severity(allure.severity_level.CRITICAL)
 def test_every_outcome_cites_at_least_one_project(desktop_page: LandingPage) -> None:
-    """No outcome may stand without a citation.
+    """Assert every outcome row carries at least one citation.
 
-    The tab's own premise is that each claim is verifiable in source rather than
-    self-reported, so a row with an empty Evidence column silently breaks the
-    promise the page makes to its reader.
+    A row with an empty Evidence column breaks the tab's premise that each
+    claim is verifiable in source rather than self-reported.
 
     Args:
-        desktop_page: Landing Page Object at the 1920x1080 viewport.
+        desktop_page (LandingPage): The landing Page Object at 1920x1080.
+
+    Returns:
+        None
     """
     landing_page = desktop_page.navigate()
     landing_page.open_tab(NavigationTab.ENGINEERING_OUTCOMES)
@@ -110,14 +138,17 @@ def test_every_outcome_cites_at_least_one_project(desktop_page: LandingPage) -> 
 def test_evidence_cross_reference_opens_its_project_tab(
     desktop_page: LandingPage, cited_tab: NavigationTab
 ) -> None:
-    """A citation must open the tab whose label it displays.
+    """Assert a citation opens the tab whose label it displays.
 
-    This is the assertion that catches a mislabelled or stale ``data-target``:
-    the control can look perfectly correct and still open the wrong project.
+    This catches a mislabeled or stale ``data-target``: the control can look
+    correct and still open the wrong project.
 
     Args:
-        desktop_page: Landing Page Object at the 1920x1080 viewport.
-        cited_tab: The project tab this citation is expected to open.
+        desktop_page (LandingPage): The landing Page Object at 1920x1080.
+        cited_tab (NavigationTab): The project tab the citation must open.
+
+    Returns:
+        None
     """
     landing_page = desktop_page.navigate()
     landing_page.open_tab(NavigationTab.ENGINEERING_OUTCOMES)
@@ -141,21 +172,17 @@ def test_evidence_cross_reference_opens_its_project_tab(
 def test_only_the_leading_claim_is_promoted_to_its_own_line(
     desktop_page: LandingPage,
 ) -> None:
-    """Only an outcome's opening claim may render as a block.
+    """Assert only each row's leading claim renders as a block.
 
-    Each row opens with a bold claim that the stylesheet lifts onto its own
-    line, which is what makes the table scannable. Emphasis used later in the
-    same sentence must stay inline: promoting it to a block splits the sentence
-    around the emphasised words and leaves a stray fragment on the following
-    line.
-
-    This is a regression guard rather than a hypothetical. The rule was first
-    written against every ``<strong>`` in the cell, which was harmless until a
-    row emphasised a figure mid-prose, and the damage was visible only by
-    looking at the rendered page.
+    The first emphasis in a row must be ``block``, giving the row its headline,
+    and any later emphasis must not be, since a block mid-sentence splits the
+    prose and leaves a stray fragment on the next line.
 
     Args:
-        desktop_page: Landing Page Object at the 1920x1080 viewport.
+        desktop_page (LandingPage): The landing Page Object at 1920x1080.
+
+    Returns:
+        None
     """
     landing_page = desktop_page.navigate()
     landing_page.open_tab(NavigationTab.ENGINEERING_OUTCOMES)
@@ -194,14 +221,13 @@ def test_only_the_leading_claim_is_promoted_to_its_own_line(
 @allure.story("Outcome rows share the site's row-hover treatment")
 @allure.severity(allure.severity_level.NORMAL)
 def test_outcome_rows_share_the_table_hover_color(desktop_page: LandingPage) -> None:
-    """An outcome row must tint on hover exactly like a skills-matrix row.
-
-    The reference is another table rather than a hard coded color, so a future
-    re-theme that changes the hover color everywhere stays green while a rule
-    that drifts out of the shared selector list fails.
+    """Assert an outcome row hovers to a skills-matrix row's color, and changes.
 
     Args:
-        desktop_page: Landing Page Object at the 1920x1080 viewport.
+        desktop_page (LandingPage): The landing Page Object at 1920x1080.
+
+    Returns:
+        None
     """
     landing_page = desktop_page.navigate()
 
@@ -238,14 +264,16 @@ def test_outcome_rows_share_the_table_hover_color(desktop_page: LandingPage) -> 
 def test_evidence_cross_reference_is_keyboard_operable(
     desktop_page: LandingPage,
 ) -> None:
-    """A citation must activate on Enter, not only on click.
+    """Assert a citation activates on Enter, not only on click.
 
-    The controls publish a button role. Anything that claims that role has to
-    behave like one, or a keyboard-only visitor cannot reach the projects at
-    all.
+    The controls carry a button role, and a control in that role must behave
+    like one or a keyboard-only visitor cannot reach the projects at all.
 
     Args:
-        desktop_page: Landing Page Object at the 1920x1080 viewport.
+        desktop_page (LandingPage): The landing Page Object at 1920x1080.
+
+    Returns:
+        None
     """
     landing_page = desktop_page.navigate()
     landing_page.open_tab(NavigationTab.ENGINEERING_OUTCOMES)

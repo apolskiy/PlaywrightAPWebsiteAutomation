@@ -1,8 +1,35 @@
-"""Header integrity and single-page-application routing coverage.
+"""Tests for the landing page's header, footer and tab routing.
 
-Every assertion here is expressed through :class:`~pages.landing_page.LandingPage`;
-this module deliberately contains no selectors and no direct Playwright page
-calls, so a markup change is absorbed by the Page Object alone.
+Created: 2026-07-28
+Last updated: 2026-11-10
+
+This file contains the tests that the page loads with its title, profile
+header and footer; that the portrait is self-hosted and decodes; that Home is
+the default tab; that each tab reveals exactly its own panel, one case per
+``NavigationTab``; that switching tabs deselects the previous one; that the
+header and footer persist across every tab; and that Home renders the skills
+matrix.
+
+They run on the deployment path at the desktop viewport. A failure means the
+page's identity or its single-page router is broken for every visitor, and
+most other suites, which open tabs through the same router, are likely to fail
+with it.
+
+**No selectors here.** Every assertion goes through
+:class:`~pages.landing_page.LandingPage`, and the module makes no direct
+Playwright page call, so a markup change is absorbed by the Page Object alone.
+
+**The title is checked for the owner's name, not a technology.** Until
+2026-08-09 it required "Playwright", which tied the page's most visible SEO
+element, the one a search result and a browser tab show, to one library in a
+list that keeps changing. The person the portfolio belongs to is the part that
+has to be there.
+
+**The tab case grows with the enum.** Publishing a tab in ``NavigationTab``
+adds a case with no edit here.
+
+Specified by ``README.md`` sections "Project Architecture" and
+"Test Design Principles".
 """
 
 from __future__ import annotations
@@ -23,18 +50,18 @@ FEATURE_NAME = "Navigation and SPA Routing"
 @allure.story("The landing page publishes the site owner's identity")
 @allure.severity(allure.severity_level.BLOCKER)
 def test_landing_page_exposes_owner_identity(desktop_page: LandingPage) -> None:
-    """The page must load with its title, portrait, name, and footer intact.
+    """Assert the page loads with its owner's title, portrait, name and footer.
 
     Args:
-        desktop_page: Landing Page Object at the 1920x1080 viewport.
+        desktop_page (LandingPage): The landing Page Object at 1920x1080.
+
+    Returns:
+        None
     """
     landing_page = desktop_page.navigate()
 
-    # The title is asserted on the owner's name rather than on a technology.
-    # It previously required "Playwright", which tied the single most important
-    # SEO element on the page to one library in a list that will keep changing -
-    # and the title is what a search result and a browser tab actually show. The
-    # person the portfolio belongs to is the part that has to be there.
+    # Decided 2026-08-09: the title is checked for the owner's name, not a
+    # technology. The module docstring holds the reason.
     with allure.step("Verify the document title identifies the site owner"):
         landing_page.expect_title_contains(PROFILE_NAME)
 
@@ -52,14 +79,17 @@ def test_landing_page_exposes_owner_identity(desktop_page: LandingPage) -> None:
 @allure.story("The profile portrait is a first-party asset that actually loads")
 @allure.severity(allure.severity_level.CRITICAL)
 def test_profile_photo_is_self_hosted_and_renders(desktop_page: LandingPage) -> None:
-    """The portrait must be served by the site and decode successfully.
+    """Assert the portrait is served by the site itself and decodes.
 
-    Being visible is not enough: an ``<img>`` with alt text and fixed dimensions
-    still occupies space when its source 404s, so this checks the intrinsic size
-    the browser actually decoded.
+    Visibility alone proves nothing here: an ``<img>`` with alt text and fixed
+    dimensions still takes up space when its source answers 404, so the case
+    checks the intrinsic size the browser decoded.
 
     Args:
-        desktop_page: Landing Page Object at the 1920x1080 viewport.
+        desktop_page (LandingPage): The landing Page Object at 1920x1080.
+
+    Returns:
+        None
     """
     landing_page = desktop_page.navigate()
 
@@ -88,10 +118,13 @@ def test_profile_photo_is_self_hosted_and_renders(desktop_page: LandingPage) -> 
 @allure.story("Home is the default tab on first load")
 @allure.severity(allure.severity_level.CRITICAL)
 def test_home_tab_is_selected_on_first_load(desktop_page: LandingPage) -> None:
-    """A cold load must land on Home with only the Home panel displayed.
+    """Assert a cold load lands on Home with only the Home panel displayed.
 
     Args:
-        desktop_page: Landing Page Object at the 1920x1080 viewport.
+        desktop_page (LandingPage): The landing Page Object at 1920x1080.
+
+    Returns:
+        None
     """
     landing_page = desktop_page.navigate()
 
@@ -113,11 +146,14 @@ def test_home_tab_is_selected_on_first_load(desktop_page: LandingPage) -> None:
 def test_activating_a_tab_reveals_only_its_panel(
     desktop_page: LandingPage, selected_tab: NavigationTab
 ) -> None:
-    """Activating any tab must display its panel and hide all the others.
+    """Assert activating a tab selects it, shows its panel and hides all others.
 
     Args:
-        desktop_page: Landing Page Object at the 1920x1080 viewport.
-        selected_tab: The navigation tab exercised by this parametrization.
+        desktop_page (LandingPage): The landing Page Object at 1920x1080.
+        selected_tab (NavigationTab): The tab this case activates.
+
+    Returns:
+        None
     """
     landing_page = desktop_page.navigate()
 
@@ -139,10 +175,13 @@ def test_activating_a_tab_reveals_only_its_panel(
 @allure.story("Switching tabs clears the previously selected tab")
 @allure.severity(allure.severity_level.NORMAL)
 def test_switching_tabs_deselects_the_previous_tab(desktop_page: LandingPage) -> None:
-    """The router must never leave two tabs in the active state at once.
+    """Assert the router never leaves two tabs active at once.
 
     Args:
-        desktop_page: Landing Page Object at the 1920x1080 viewport.
+        desktop_page (LandingPage): The landing Page Object at 1920x1080.
+
+    Returns:
+        None
     """
     landing_page = desktop_page.navigate()
 
@@ -163,10 +202,13 @@ def test_switching_tabs_deselects_the_previous_tab(desktop_page: LandingPage) ->
 @allure.story("The profile header and footer persist across every tab")
 @allure.severity(allure.severity_level.NORMAL)
 def test_profile_header_and_footer_persist_across_tabs(desktop_page: LandingPage) -> None:
-    """Chrome outside the tab container must survive every routing transition.
+    """Assert the profile header, portrait and footer stay visible on every tab.
 
     Args:
-        desktop_page: Landing Page Object at the 1920x1080 viewport.
+        desktop_page (LandingPage): The landing Page Object at 1920x1080.
+
+    Returns:
+        None
     """
     landing_page = desktop_page.navigate()
 
@@ -184,10 +226,13 @@ def test_profile_header_and_footer_persist_across_tabs(desktop_page: LandingPage
 @allure.story("The Home panel renders the technical skills matrix")
 @allure.severity(allure.severity_level.NORMAL)
 def test_home_panel_renders_the_skills_matrix(desktop_page: LandingPage) -> None:
-    """The Home tab must present the skills table with both column headers.
+    """Assert the Home tab shows the skills table with both column headers.
 
     Args:
-        desktop_page: Landing Page Object at the 1920x1080 viewport.
+        desktop_page (LandingPage): The landing Page Object at 1920x1080.
+
+    Returns:
+        None
     """
     landing_page = desktop_page.navigate()
 

@@ -1,20 +1,36 @@
-"""Read-only Docker Hub registry client used to audit a published image.
+"""Reads a published Docker Hub image and reports the Python packages it installs.
 
-The site's HTTP Emulators tab claims the published ``apolskiy/flask_app`` image
-carries Flask and nothing beyond Flask's own dependency closure. That claim is
-only ever as true as the last build behind it: a stray entry in the image's
-``requirements.txt``, or a rebuild that picks up the development requirements,
-would falsify it silently while the page keeps advertising the old number.
+Created: 2026-08-03
+Last updated: 2026-11-10
 
-This module reads the published image straight from the registry - anonymous
-pull token, manifest, then the layer blobs - and reports which Python
-distributions the image actually installs. Nothing here runs Docker, because a
-test that needed a container runtime could not run on the same hosted runner as
-the rest of the suite.
+This file contains ``fetch_pull_token`` and ``resolve_image_manifest``, which
+obtain an anonymous pull token and resolve a tag to one platform's manifest;
+``installed_distributions``, which reads every layer and returns each installed
+distribution with its version; and ``application_distributions``, which
+returns the same minus ``BASE_IMAGE_DISTRIBUTIONS``. Private helpers fetch,
+decode and scan the layers.
 
-Only the standard library is used. The suite already carries a browser engine
-for its own transport; adding an HTTP client so that one test could inspect a
-container would be a second way to make a request and a third thing to pin.
+``test_published_image_claims.py`` compares what this module reports for
+``apolskiy/flask_app`` against the dependency closure the HTTP Emulators tab
+claims. It runs in the weekly ``external`` check, since it reaches Docker Hub,
+so a failure here reports an image that drifted from its claim and never
+decides a deploy.
+
+**The image is read from the registry, not run.** Pull token, manifest, then
+layer blobs, reading the names of ``*.dist-info`` directories. No container
+runtime and no HTTP client are involved.
+
+**Both manifest spellings and both forms are accepted.** OCI and legacy Docker
+media types, single manifest and multi-platform index: Buildx publishes an
+index even for a one-platform image, so asking only for a manifest would 404 on
+the tag it just pushed. From an index the linux/amd64 entry is followed, and
+attestation entries, whose architecture is ``unknown``, are skipped.
+
+**Layers are streamed, not decompressed whole.** A base-image layer expands to
+several hundred megabytes and only its member names are needed.
+
+Specified by ``README.md`` section "Key Features" (Published Artefact
+Verification, Off the Deploy Path).
 """
 
 from __future__ import annotations
@@ -26,16 +42,15 @@ import tarfile
 import urllib.request
 from typing import Final
 
-#: Registry endpoint serving manifests and blobs for Docker Hub images.
+#: REGISTRY. The endpoint serving manifests and blobs of Docker Hub images.
 REGISTRY_HOST: Final[str] = "https://registry-1.docker.io"
 
-#: Endpoint issuing the anonymous, pull-scoped bearer token the registry wants.
+#: TOKEN ISSUER. The endpoint issuing the anonymous, pull-scoped bearer token.
 TOKEN_HOST: Final[str] = "https://auth.docker.io/token"
 
-#: Media types accepted when resolving a reference. Both the OCI and the legacy
-#: Docker spellings are listed, and both the single-manifest and the multi
-#: platform index forms: Buildx publishes an index even for a one-platform
-#: image, so asking only for a manifest would 404 on the tag it just pushed.
+#: ACCEPTED MEDIA TYPES when resolving a reference: OCI and legacy Docker,
+#: single manifest and multi-platform index. Why both forms: the module
+#: docstring.
 MANIFEST_MEDIA_TYPES: Final[tuple[str, ...]] = (
     "application/vnd.oci.image.index.v1+json",
     "application/vnd.oci.image.manifest.v1+json",
@@ -43,31 +58,33 @@ MANIFEST_MEDIA_TYPES: Final[tuple[str, ...]] = (
     "application/vnd.docker.distribution.manifest.v2+json",
 )
 
-#: Packaging tooling every Python base image ships. It is not part of what the
-#: application asked for, so callers comparing against a declared dependency set
-#: subtract it rather than pretending the base image is empty.
+#: SUBTRACTED, per ``README.md`` section "Key Features". The packaging tooling
+#: every Python base image ships, which the application did not ask for.
 BASE_IMAGE_DISTRIBUTIONS: Final[frozenset[str]] = frozenset({"pip", "setuptools", "wheel"})
 
-#: Platform selected from a multi-platform index.
+#: TARGET PLATFORM selected from a multi-platform index.
 TARGET_ARCHITECTURE: Final[str] = "amd64"
 TARGET_OPERATING_SYSTEM: Final[str] = "linux"
 
-#: Ceiling on any single registry call, in seconds.
+#: BOUNDED. The ceiling of any one registry call, in seconds.
 REQUEST_TIMEOUT_SECONDS: Final[int] = 30
 
-#: Suffix marking an installed-distribution metadata directory.
+#: METADATA MARKER. The suffix of an installed distribution's metadata directory.
 DIST_INFO_SUFFIX: Final[str] = ".dist-info"
 
 
 def _read_bytes(url: str, headers: dict[str, str]) -> bytes:
-    """Perform one GET and return the raw response body.
+    """Return the raw body of one GET request.
 
     Args:
-        url: Absolute URL to fetch.
-        headers: Request headers to send.
+        url (str): The absolute URL to fetch.
+        headers (dict): The request headers to send.
 
     Returns:
-        The response body as bytes.
+        bytes: The response body.
+
+    Raises:
+        urllib.error.URLError: When the request fails.
     """
     request = urllib.request.Request(url, headers=headers)
     with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
@@ -75,60 +92,60 @@ def _read_bytes(url: str, headers: dict[str, str]) -> bytes:
 
 
 def _read_json(url: str, headers: dict[str, str]) -> dict:
-    """Perform one GET and decode the response body as JSON.
+    """Return the body of one GET request, decoded as JSON.
 
     Args:
-        url: Absolute URL to fetch.
-        headers: Request headers to send.
+        url (str): The absolute URL to fetch.
+        headers (dict): The request headers to send.
 
     Returns:
-        The decoded JSON document.
+        dict: The decoded JSON document.
     """
     return json.loads(_read_bytes(url, headers).decode("utf-8"))
 
 
 def fetch_pull_token(repository: str) -> str:
-    """Obtain an anonymous pull token for a public repository.
+    """Return an anonymous pull token for a public repository.
 
     Args:
-        repository: Repository in ``namespace/name`` form.
+        repository (str): The repository, in ``namespace/name`` form.
 
     Returns:
-        A bearer token accepted by the manifest and blob endpoints.
+        str: A bearer token the manifest and blob endpoints accept.
     """
     token_url = f"{TOKEN_HOST}?service=registry.docker.io&scope=repository:{repository}:pull"
     return _read_json(token_url, {})["token"]
 
 
 def _manifest_headers(token: str) -> dict[str, str]:
-    """Build the headers used for a manifest request.
+    """Return the headers of a manifest request.
 
     Args:
-        token: Bearer token from :func:`fetch_pull_token`.
+        token (str): The bearer token from :func:`fetch_pull_token`.
 
     Returns:
-        Headers carrying the token and every accepted manifest media type.
+        dict[str, str]: Headers carrying the token and every accepted manifest
+        media type.
     """
     return {"Authorization": f"Bearer {token}", "Accept": ", ".join(MANIFEST_MEDIA_TYPES)}
 
 
 def resolve_image_manifest(repository: str, reference: str, token: str) -> dict:
-    """Resolve a tag or digest to a single-platform image manifest.
+    """Return the single-platform image manifest a tag or digest resolves to.
 
-    A reference may resolve to an index listing several platforms, in which case
-    the Linux/amd64 entry is followed. Attestation entries carry an ``unknown``
-    architecture and are skipped rather than mistaken for an image.
+    When the reference resolves to an index, its linux/amd64 entry is followed;
+    attestation entries, whose architecture is ``unknown``, never match.
 
     Args:
-        repository: Repository in ``namespace/name`` form.
-        reference: Tag name or digest to resolve.
-        token: Bearer token from :func:`fetch_pull_token`.
+        repository (str): The repository, in ``namespace/name`` form.
+        reference (str): The tag name or digest to resolve.
+        token (str): The bearer token from :func:`fetch_pull_token`.
 
     Returns:
-        The manifest document for the selected platform.
+        dict: The manifest document of the selected platform.
 
     Raises:
-        LookupError: If the index carries no entry for the target platform.
+        LookupError: When the index carries no entry for the target platform.
     """
     manifest_url = f"{REGISTRY_HOST}/v2/{repository}/manifests/{reference}"
     manifest = _read_json(manifest_url, _manifest_headers(token))
@@ -151,15 +168,16 @@ def resolve_image_manifest(repository: str, reference: str, token: str) -> dict:
 
 
 def _parse_dist_info(member_path: str) -> tuple[str, str] | None:
-    """Extract a distribution name and version from an archive member path.
+    """Return the distribution name and version an archive member path names.
 
     Args:
-        member_path: Path of one entry inside a layer archive, for example
+        member_path (str): The path of one entry inside a layer archive, for
+            example
             ``usr/local/lib/python3.14/site-packages/flask-3.1.2.dist-info/METADATA``.
 
     Returns:
-        A ``(name, version)`` pair with the name normalised to lower case with
-        hyphens, or ``None`` when the path names no distribution.
+        tuple[str, str] | None: A ``(name, version)`` pair, the name normalized
+        to lower case with hyphens, or None when the path names no distribution.
     """
     for segment in member_path.split("/"):
         if not segment.endswith(DIST_INFO_SUFFIX):
@@ -172,16 +190,16 @@ def _parse_dist_info(member_path: str) -> tuple[str, str] | None:
 
 
 def _distributions_in_layer(blob: bytes) -> dict[str, str]:
-    """List the distributions whose metadata appears in one layer.
+    """Return the distributions whose metadata appears in one layer.
 
-    The archive is streamed rather than decompressed whole: a base-image layer
-    expands to several hundred megabytes and only its member names are needed.
+    The archive is streamed, reading member names only.
 
     Args:
-        blob: Gzipped tar bytes of a single image layer.
+        blob (bytes): The gzipped tar bytes of one image layer.
 
     Returns:
-        Mapping of distribution name to version found in this layer.
+        dict[str, str]: Each distribution name found in the layer, mapped to
+        its version.
     """
     found: dict[str, str] = {}
     decompressed = gzip.GzipFile(fileobj=io.BytesIO(blob))
@@ -194,17 +212,15 @@ def _distributions_in_layer(blob: bytes) -> dict[str, str]:
 
 
 def installed_distributions(repository: str, reference: str = "latest") -> dict[str, str]:
-    """Report every Python distribution installed in a published image.
+    """Return every Python distribution installed in a published image.
 
     Args:
-        repository: Repository in ``namespace/name`` form.
-        reference: Tag name or digest to inspect.
+        repository (str): The repository, in ``namespace/name`` form.
+        reference (str): The tag name or digest to inspect.
 
     Returns:
-        Mapping of distribution name to version, covering every layer. Base
-        image tooling is included; callers subtract
-        :data:`BASE_IMAGE_DISTRIBUTIONS` when they want only what the
-        application installed.
+        dict[str, str]: Each distribution name mapped to its version, across
+        every layer, base image tooling included.
     """
     token = fetch_pull_token(repository)
     manifest = resolve_image_manifest(repository, reference, token)
@@ -218,15 +234,15 @@ def installed_distributions(repository: str, reference: str = "latest") -> dict[
 
 
 def application_distributions(repository: str, reference: str = "latest") -> dict[str, str]:
-    """Report the distributions an image installs beyond its base tooling.
+    """Return the distributions an image installs beyond its base tooling.
 
     Args:
-        repository: Repository in ``namespace/name`` form.
-        reference: Tag name or digest to inspect.
+        repository (str): The repository, in ``namespace/name`` form.
+        reference (str): The tag name or digest to inspect.
 
     Returns:
-        Mapping of distribution name to version, excluding the packaging tools
-        every Python base image carries.
+        dict[str, str]: Each distribution name mapped to its version, minus
+        :data:`BASE_IMAGE_DISTRIBUTIONS`.
     """
     return {
         name: version

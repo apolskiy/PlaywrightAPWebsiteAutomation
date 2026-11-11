@@ -1,19 +1,27 @@
-"""Coverage for the container claim published on the HTTP Emulators tab.
+"""Tests that the published container image holds what the HTTP Emulators tab claims.
 
-The site states that the ``apolskiy/flask_app`` image carries Flask and its six
-transitive dependencies and nothing else. Every other assertion in this suite
-checks that the page says what it means to say; this one checks that what it
-says is still true of the artefact a reader would pull.
+Created: 2026-08-03
+Last updated: 2026-11-10
 
-The failure this guards against is silent. Nothing about a careless rebuild
-looks wrong from the browser: the tab keeps rendering, the link keeps
-resolving, and the published size claim simply stops matching the image behind
-it. Only reading the image catches that.
+This file covers one behavior: the ``apolskiy/flask_app`` image installs exactly
+Flask and its six transitive dependencies, with base packaging tooling
+subtracted. It reads the image through ``utils.registry_client`` and compares
+the installed distributions against ``EXPECTED_DISTRIBUTIONS``.
 
-Marked ``external``: it resolves a third party, so it is deselected on the
-deployment path for the same reason the link-rot check is. A dependency
-regression in a container is a monthly risk, not a per-push one, and Docker Hub
-does not belong in the critical path of a deploy signal.
+The case is marked ``external`` and runs weekly, off the deployment path,
+because it reads Docker Hub. A failure means the published image no longer
+matches the page: a distribution outside the set means a development dependency
+reached a public image, a missing one means the image no longer runs what the
+tab advertises, and an empty read means the image or its manifest could not be
+read at all.
+
+**It checks contents, not behavior.** Nothing about a careless rebuild shows in
+the browser: the tab renders, the link resolves, and only reading the image
+catches the claim going false. Whether the image serves requests is tested in
+the image's own repository.
+
+Specified by ``README.md`` section "Key Features" (Published Artefact
+Verification, Off the Deploy Path).
 """
 
 from __future__ import annotations
@@ -26,12 +34,11 @@ from utils.registry_client import BASE_IMAGE_DISTRIBUTIONS, application_distribu
 EPIC_NAME = "Portfolio Website Quality"
 FEATURE_NAME = "Published Artefact Integrity"
 
-#: The image the HTTP Emulators tab advertises to readers.
+#: THE ADVERTISED IMAGE, as the HTTP Emulators tab names it to readers.
 PUBLISHED_IMAGE: str = "apolskiy/flask_app"
 
-#: Flask plus exactly its transitive closure - the set the site claims. Anything
-#: outside it means a development dependency reached a public image; anything
-#: missing from it means the image no longer runs what it advertises.
+#: THE CLAIMED CLOSURE. Flask plus exactly its transitive dependencies, the set
+#: the site claims. A name outside it, or missing from it, fails the case.
 EXPECTED_DISTRIBUTIONS: frozenset[str] = frozenset(
     {"flask", "blinker", "click", "itsdangerous", "jinja2", "markupsafe", "werkzeug"}
 )
@@ -44,7 +51,14 @@ EXPECTED_DISTRIBUTIONS: frozenset[str] = frozenset(
 @allure.severity(allure.severity_level.CRITICAL)
 @pytest.mark.external
 def test_published_image_carries_only_the_declared_dependency_closure() -> None:
-    """The published image must install Flask's closure and nothing besides."""
+    """Assert the published image installs Flask's closure and nothing besides.
+
+    The read must return at least one distribution beyond base tooling, none
+    outside ``EXPECTED_DISTRIBUTIONS``, and every name in it.
+
+    Returns:
+        None
+    """
     with allure.step(f"Read the distributions installed in {PUBLISHED_IMAGE}"):
         installed = application_distributions(PUBLISHED_IMAGE)
         allure.attach(

@@ -1,15 +1,39 @@
-"""Asynchronous Playwright crawler that discovers the site's route surface.
+"""Discovers the site's internal routes with a browser and writes them as a sitemap.
 
-The crawler renders each page with a real browser rather than fetching raw HTML,
-because the target application publishes every outbound link as a base64 payload
-that only becomes an ``<a href>`` after its ``DOMContentLoaded`` script runs. A
-requests-based crawler would therefore discover nothing.
+Created: 2026-07-28
+Last updated: 2026-11-10
 
-Discovery is breadth-first from the base URL, bounded by both depth and page
-count so a link cycle or an unexpectedly large site can never hang a test
-session. The resulting sitemap is written to ``reports/sitemap.json`` and is the
-input that ``tests/test_dynamic_routes.py`` parameterizes over, so a newly added
-page grows the suite automatically.
+This file contains ``SiteMapCrawler``, an asynchronous breadth-first Playwright
+crawler; ``DiscoveredRoute``, one route it found with its parent, timestamp and
+HTTP status; ``JavaScriptError``, an unhandled exception seen during the walk;
+``discover_routes``, the synchronous entry point that crawls and writes
+``reports/sitemap.json``; and ``load_sitemap``, which reads that file back.
+
+``tests/test_dynamic_routes.py`` calls ``discover_routes``, or ``load_sitemap``
+under ``--use-cached-sitemap``, during collection and parameterizes its health
+checks over the result, so a newly published page grows the suite with no test
+edit. A route missed here is a route no test checks; a route that fails to load
+is still listed, with status ``0``, so it fails a test rather than vanishing.
+
+**It renders, it does not fetch.** The site's links become ``<a href>`` only
+after its ``DOMContentLoaded`` script runs, so each page is loaded in a real
+browser before its anchors are read.
+
+**Scope and canonical form.** Relative paths and bare fragments resolve against
+the page they were found on. External hosts, non-HTTP schemes, asset files and
+the report paths in ``FOREIGN_REPORT_PATH_PREFIXES`` are rejected. An accepted
+URL is lower-cased in scheme and host and given ``/`` for an empty path, so two
+spellings of one document collapse to one route.
+
+**Fragments are routes, not documents.** A fragment URL is recorded as its own
+route but its document is fetched and expanded once. Traversal stops at
+``max_depth`` and ``max_pages``.
+
+**Nothing here aborts collection.** A navigation error is logged and recorded as
+status ``0``, a page whose links cannot be read contributes none, and an
+unreadable sitemap cache reads as no cache, so the caller re-crawls.
+
+Specified by ``README.md`` section "Dynamic Site Discovery".
 """
 
 from __future__ import annotations
@@ -30,15 +54,15 @@ from config.settings import FOREIGN_REPORT_PATH_PREFIXES
 
 LOGGER = logging.getLogger(__name__)
 
-#: Default location of the generated sitemap artifact.
+#: ARTIFACT. The default location of the generated sitemap.
 DEFAULT_SITEMAP_PATH: Final[Path] = Path("reports") / "sitemap.json"
 
-#: URL schemes that identify a link as something other than a crawlable page.
+#: REJECTED SCHEMES. A link with one of these is never a crawlable page.
 NON_CRAWLABLE_SCHEMES: Final[frozenset[str]] = frozenset(
     {"mailto", "tel", "javascript", "sms", "data", "file", "ftp"}
 )
 
-#: File extensions that are assets rather than HTML documents.
+#: REJECTED EXTENSIONS. A path ending in one of these is an asset, not HTML.
 NON_HTML_EXTENSIONS: Final[frozenset[str]] = frozenset(
     {
         ".pdf", ".zip", ".tar", ".gz", ".rar", ".7z",
@@ -50,8 +74,8 @@ NON_HTML_EXTENSIONS: Final[frozenset[str]] = frozenset(
     }
 )
 
-#: Safety rails. The target is a small portfolio; these bounds exist so a
-#: pathological link graph cannot stall collection.
+#: BOUNDED, per ``README.md`` section "Dynamic Site Discovery". Depth, page
+#: count and per-navigation timeout, so a link cycle cannot stall collection.
 DEFAULT_MAX_DEPTH: Final[int] = 3
 DEFAULT_MAX_PAGES: Final[int] = 50
 DEFAULT_NAVIGATION_TIMEOUT_MS: Final[int] = 20_000
@@ -59,15 +83,15 @@ DEFAULT_NAVIGATION_TIMEOUT_MS: Final[int] = 20_000
 
 @dataclass(frozen=True)
 class DiscoveredRoute:
-    """One route found by the crawler.
+    """Hold one route the crawler found.
 
     Attributes:
-        url: Absolute URL of the route, including any fragment it was reached by.
-        parent_route: URL the route was discovered from. The seed route records
-            an empty string, since nothing linked to it.
-        discovered_at: UTC ISO-8601 timestamp of when the route was visited.
-        status_code: HTTP status returned for the document, or ``0`` when the
-            navigation produced no response at all.
+        url (str): The absolute URL of the route, with any fragment it was
+            reached by.
+        parent_route (str): The URL the route was found on; empty for the seed.
+        discovered_at (str): The UTC ISO-8601 time the route was visited.
+        status_code (int): The document's HTTP status, or ``0`` when the
+            navigation produced no response.
     """
 
     url: str
@@ -77,11 +101,11 @@ class DiscoveredRoute:
 
     @property
     def route_id(self) -> str:
-        """Human-readable identifier used as the pytest parametrization id.
+        """Return the identifier used as the route's pytest parametrization id.
 
         Returns:
-            The path and fragment of the route, e.g. ``/`` or ``/about#team``.
-            Characters pytest would mangle in a test id are replaced.
+            str: The path and fragment, such as ``/`` or ``/about#team``, with
+            spaces replaced by underscores.
         """
         parsed_url = urlparse(self.url)
         identifier = parsed_url.path or "/"
@@ -92,11 +116,11 @@ class DiscoveredRoute:
 
 @dataclass(frozen=True)
 class JavaScriptError:
-    """An unhandled JavaScript exception observed while crawling.
+    """Hold one unhandled JavaScript exception observed while crawling.
 
     Attributes:
-        url: Route on which the exception surfaced.
-        message: The error message reported by the page.
+        url (str): The crawl's base URL, against which the exception is filed.
+        message (str): The error message the page reported.
     """
 
     url: str
@@ -104,14 +128,14 @@ class JavaScriptError:
 
 
 class SiteMapCrawler:
-    """Breadth-first Playwright crawler over a site's internal route graph.
+    """Walk a site's internal route graph breadth-first in a real browser.
 
     Args:
-        base_url: Absolute URL the crawl starts from. Its host defines what
-            counts as internal.
-        max_depth: Maximum link depth to follow from the seed route.
-        max_pages: Hard ceiling on the number of documents visited.
-        navigation_timeout_ms: Per-navigation timeout in milliseconds.
+        base_url (str): The absolute URL the crawl starts from. Its host defines
+            what counts as internal.
+        max_depth (int): The deepest link level followed from the seed.
+        max_pages (int): The most routes recorded.
+        navigation_timeout_ms (int): The timeout of each navigation.
     """
 
     def __init__(
@@ -130,26 +154,25 @@ class SiteMapCrawler:
 
     @property
     def javascript_errors(self) -> list[JavaScriptError]:
-        """Unhandled JavaScript exceptions captured during the last crawl.
+        """Return the unhandled JavaScript exceptions captured by the last crawl.
 
         Returns:
-            One entry per ``pageerror`` event observed while navigating.
+            list[JavaScriptError]: One entry per ``pageerror`` event.
         """
         return list(self._javascript_errors)
 
     async def crawl(self) -> list[DiscoveredRoute]:
-        """Walk the site and return every internal route reachable from the seed.
+        """Return every internal route reachable from the seed.
 
         Returns:
-            The discovered routes in breadth-first order, starting with the seed.
-            A route that could not be navigated is still reported, with a status
-            code of ``0``, so a broken link surfaces as a failing test rather
-            than silently vanishing from the sitemap.
+            list[DiscoveredRoute]: The routes in breadth-first order, seed
+            first. A route that could not be navigated is included with status
+            code ``0``.
         """
         self._javascript_errors = []
         discovered_routes: list[DiscoveredRoute] = []
-        # Deduplicate on the fragment-less URL: '#projects' is a distinct route
-        # for reporting, but it is the same document and must not be re-fetched.
+        # Decided 2026-07-28: '#projects' is its own route for reporting but the
+        # same document, so documents are tracked fragment-less and fetched once.
         visited_documents: set[str] = set()
         recorded_routes: set[str] = set()
         pending: deque[tuple[str, str, int]] = deque([(self._base_url, "", 0)])
@@ -191,16 +214,15 @@ class SiteMapCrawler:
         return discovered_routes
 
     async def _visit(self, page: Page, url: str) -> int:
-        """Navigate to a URL and report the document's HTTP status.
+        """Navigate to a URL and return the document's HTTP status.
 
         Args:
-            page: The reusable page driving the crawl.
-            url: Absolute URL to navigate to.
+            page (Page): The reusable page driving the crawl.
+            url (str): The absolute URL to navigate to.
 
         Returns:
-            The HTTP status code, or ``0`` when navigation failed outright or
-            returned no response. Navigation errors are logged rather than
-            raised so one unreachable link cannot abort the whole crawl.
+            int: The HTTP status, or ``0`` when navigation failed or returned no
+            response. A navigation error is logged, not raised.
         """
         try:
             response = await page.goto(
@@ -212,15 +234,16 @@ class SiteMapCrawler:
         return response.status if response is not None else 0
 
     async def _extract_internal_links(self, page: Page, current_url: str) -> list[str]:
-        """Collect the crawlable internal links published by the current page.
+        """Return the crawlable internal links the current page publishes.
 
         Args:
-            page: The page whose DOM should be scanned.
-            current_url: URL used to resolve relative and fragment-only hrefs.
+            page (Page): The page whose anchors are read.
+            current_url (str): The URL relative and fragment-only hrefs resolve
+                against.
 
         Returns:
-            Absolute, deduplicated URLs that pass the internal-link filter, in
-            document order.
+            list[str]: Absolute, deduplicated URLs that pass :meth:`_normalize`,
+            in document order; empty when the anchors cannot be read.
         """
         try:
             raw_hrefs: list[str] = await page.eval_on_selector_all(
@@ -240,23 +263,21 @@ class SiteMapCrawler:
         return internal_links
 
     def _normalize(self, raw_href: str | None, current_url: str) -> str | None:
-        """Resolve one ``href`` and decide whether it is a crawlable route.
+        """Return one ``href`` resolved and canonicalized, or None when out of scope.
 
-        Relative paths (``/about``) and bare fragments (``#projects``) are
-        resolved against the page they were found on. External hosts, non-HTTP
-        schemes, asset files, and reports another project publishes on this
-        host are rejected. Accepted URLs are canonicalized
-        so that spellings of the same document - notably an empty path versus
-        ``/``, which this site links to itself both ways - collapse to one route
-        instead of being crawled and reported twice.
+        Relative paths (``/about``) and bare fragments (``#projects``) resolve
+        against the page they were found on. External hosts, non-HTTP schemes,
+        asset files and foreign report paths are rejected. An accepted URL has
+        its scheme and host lower-cased and an empty path written as ``/``.
 
         Args:
-            raw_href: The raw attribute value, which may be ``None`` or empty.
-            current_url: URL used as the resolution base.
+            raw_href (str | None): The raw attribute value, possibly None or
+                empty.
+            current_url (str): The resolution base.
 
         Returns:
-            The canonical absolute URL to crawl, or ``None`` when the link is
-            out of scope.
+            str | None: The canonical absolute URL to crawl, or None when the
+            link is out of scope.
         """
         if not raw_href or not raw_href.strip():
             return None
@@ -269,9 +290,8 @@ class SiteMapCrawler:
         parsed_url = urlparse(urljoin(current_url, href))
         if parsed_url.scheme.lower() not in {"http", "https"}:
             return None
-        # A report another project publishes on this host is the same host but
-        # a different author, so it is out of scope like any external host: see
-        # FOREIGN_REPORT_PATH_PREFIXES.
+        # Added 2026-11-10: a report another project publishes on this host is
+        # out of scope like an external host; see FOREIGN_REPORT_PATH_PREFIXES.
         if parsed_url.netloc.lower() != self._base_host.lower() or parsed_url.path.startswith(
             FOREIGN_REPORT_PATH_PREFIXES
         ):
@@ -291,27 +311,29 @@ class SiteMapCrawler:
         )
 
     def _record_javascript_error(self, error: object) -> None:
-        """Capture an unhandled JavaScript exception raised by a crawled page.
+        """Record an unhandled JavaScript exception raised by a crawled page.
 
         Args:
-            error: The ``pageerror`` payload emitted by Playwright. It is typed
-                loosely because the event delivers an ``Error`` object whose
-                only guaranteed surface is its string representation.
+            error (object): The ``pageerror`` payload, a JavaScript ``Error``
+                whose only guaranteed surface is its string form.
+
+        Returns:
+            None
         """
         self._javascript_errors.append(
             JavaScriptError(url=self._base_url, message=str(error))
         )
 
     def build_artifact(self, routes: list[DiscoveredRoute]) -> dict[str, object]:
-        """Assemble the JSON document describing a completed crawl.
+        """Return the JSON document describing a completed crawl.
 
         Args:
-            routes: The routes returned by :meth:`crawl`.
+            routes (list[DiscoveredRoute]): The routes :meth:`crawl` returned.
 
         Returns:
-            A mapping with the crawl context, the route records themselves - each
-            carrying exactly ``url``, ``parent_route``, ``discovered_at``, and
-            ``status_code`` - and any JavaScript errors observed.
+            dict[str, object]: The crawl context, the route records, each with
+            exactly ``url``, ``parent_route``, ``discovered_at`` and
+            ``status_code``, and any JavaScript errors observed.
         """
         return {
             "base_url": self._base_url,
@@ -324,14 +346,15 @@ class SiteMapCrawler:
     def write_sitemap(
         self, routes: list[DiscoveredRoute], sitemap_path: Path = DEFAULT_SITEMAP_PATH
     ) -> Path:
-        """Persist a crawl result as the JSON sitemap artifact.
+        """Write a crawl result as the JSON sitemap artifact.
 
         Args:
-            routes: The routes returned by :meth:`crawl`.
-            sitemap_path: Destination file. Parent directories are created.
+            routes (list[DiscoveredRoute]): The routes :meth:`crawl` returned.
+            sitemap_path (Path): The destination file; parent directories are
+                created.
 
         Returns:
-            The path the artifact was written to.
+            Path: The path the artifact was written to.
         """
         sitemap_path.parent.mkdir(parents=True, exist_ok=True)
         sitemap_path.write_text(
@@ -341,15 +364,14 @@ class SiteMapCrawler:
 
 
 def load_sitemap(sitemap_path: Path = DEFAULT_SITEMAP_PATH) -> list[DiscoveredRoute]:
-    """Read a previously generated sitemap artifact.
+    """Return the routes a previously generated sitemap records.
 
     Args:
-        sitemap_path: Location of the artifact.
+        sitemap_path (Path): The location of the artifact.
 
     Returns:
-        The routes it records, or an empty list when the file is missing or
-        cannot be parsed. A corrupt cache degrades to "no cache" so the caller
-        simply re-crawls instead of failing collection.
+        list[DiscoveredRoute]: The recorded routes, or an empty list when the
+        file is missing or cannot be read or parsed.
     """
     if not sitemap_path.is_file():
         return []
@@ -367,20 +389,20 @@ def discover_routes(
     max_depth: int = DEFAULT_MAX_DEPTH,
     max_pages: int = DEFAULT_MAX_PAGES,
 ) -> list[DiscoveredRoute]:
-    """Run a crawl synchronously and persist the resulting sitemap.
+    """Run a crawl synchronously, write the sitemap and return its routes.
 
-    This is the entry point used from pytest collection, which is synchronous.
-    It owns its own event loop, so it must not be called from inside a running
-    loop.
+    The entry point for pytest collection. It starts its own event loop, so it
+    must not be called from inside a running loop.
 
     Args:
-        base_url: Absolute URL to start crawling from.
-        sitemap_path: Destination for the generated artifact.
-        max_depth: Maximum link depth to follow.
-        max_pages: Hard ceiling on documents visited.
+        base_url (str): The absolute URL the crawl starts from.
+        sitemap_path (Path): The destination of the generated artifact.
+        max_depth (int): The deepest link level followed.
+        max_pages (int): The most routes recorded.
 
     Returns:
-        The discovered routes, which have also been written to ``sitemap_path``.
+        list[DiscoveredRoute]: The discovered routes, also written to
+        ``sitemap_path``.
     """
     crawler = SiteMapCrawler(base_url, max_depth=max_depth, max_pages=max_pages)
     routes = asyncio.run(crawler.crawl())

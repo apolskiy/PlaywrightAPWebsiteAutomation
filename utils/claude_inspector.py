@@ -1,21 +1,40 @@
-"""Claude-powered failure triage for the Playwright suite.
+"""Asks Claude to triage a failed test and returns its report as text.
 
-When a web-first assertion fails, the raw Playwright error rarely explains *why*
-the application changed - it only reports which locator stopped resolving. This
-module hands the post-failure DOM snapshot and the browser's own error log to
-Claude and asks for a structured root-cause hypothesis, which the pytest hook
-then attaches to the Allure report.
+Created: 2026-07-28
+Last updated: 2026-11-10
 
-The two inputs answer different halves of the question. The DOM shows what the
-page ended up as; the error log shows what went wrong on the way there, and it
-frequently names the cause outright - a script that threw before it could bind
-the tab router explains a missing panel far more directly than the absence of
-that panel does. Sending only the DOM meant asking for a cause while withholding
-the evidence for it.
+This file contains ``FailureContext``, the record of one failed test (its name,
+page URL, error text, browser error log and DOM snapshot), and
+``ClaudeTestInspector``, which sends that record to the Messages API and returns
+the model's verdict, evidence, root cause and suggested fix. ``SYSTEM_PROMPT``
+is the instruction the model receives, and two constants bound the call.
 
-The inspector is strictly advisory: it never raises into the test session, and
-any transport or credential problem degrades to "no report" rather than turning
-a genuine product failure into an infrastructure failure.
+The failure hook in ``conftest.py`` calls the inspector after it has attached
+the error log, screenshot and DOM, and attaches the returned report to Allure.
+The inspector runs last and is advisory: a failure here produces no report and
+never changes the test's outcome or hides the Playwright error.
+
+**It never raises into the session.** Disabled diagnostics, a missing key or an
+API error all return None, and the API error is logged as a warning.
+
+**Both inputs are bounded and say so.** The log and the DOM are each cut to
+their limit in ``config.settings``, and a cut input carries a note naming the
+cut, so the model never reasons over a fragment believing it has the whole.
+
+**The log comes before the DOM in the prompt.** It is far smaller, more likely
+to name the cause outright, and the input that survives intact; the DOM is the
+one cut when a page is large.
+
+**The error log is a required field.** A caller with nothing to report passes
+the report of a recorder that saw nothing, which states that no errors
+occurred. That is a different claim from omitting the field, and the prompt
+reasons from it.
+
+**One call is held to 90 seconds**, so diagnostics never dominate the runtime
+of the suite they report on, and its output to a short structured report.
+
+Specified by ``README.md`` sections "Key Features" (AI-Powered Test
+Diagnostics), "Configuration" and "Reporting".
 """
 
 from __future__ import annotations
@@ -29,12 +48,11 @@ from config.settings import MAX_DIAGNOSTICS_CHARS, MAX_DOM_SNAPSHOT_CHARS, Setti
 
 LOGGER = logging.getLogger(__name__)
 
-#: Wall-clock ceiling for a single triage call, in seconds. Diagnostics must
-#: never dominate the runtime of the suite they are reporting on.
+#: BOUNDED. The wall-clock ceiling of one triage call, in seconds.
 REQUEST_TIMEOUT_SECONDS: float = 90.0
 
-#: Output ceiling for one triage response. Sized for a short structured report
-#: rather than a long-form essay.
+#: BOUNDED. The output ceiling of one triage response, sized for a short
+#: structured report.
 MAX_RESPONSE_TOKENS: int = 8_000
 
 SYSTEM_PROMPT: str = (
@@ -73,19 +91,17 @@ SYSTEM_PROMPT: str = (
 
 @dataclass(frozen=True)
 class FailureContext:
-    """Everything the inspector needs to reason about a single failed test.
+    """Hold everything the inspector needs to triage one failed test.
 
     Attributes:
-        test_name: The pytest node identifier of the failing test.
-        page_url: URL the browser was on when the failure occurred.
-        error_text: The captured assertion or exception text.
-        browser_diagnostics: The rendered browser error log for the page, as
-            produced by :meth:`~utils.page_diagnostics.PageDiagnostics.report`.
-            Required rather than optional: a caller that has nothing to say here
-            should pass the report of a recorder that saw nothing, which states
-            that no errors occurred - a materially different claim from omitting
-            the field, and one the triage prompt reasons from explicitly.
-        dom_snapshot: Fully rendered HTML of the page at failure time.
+        test_name (str): The pytest node identifier of the failing test.
+        page_url (str): The URL the browser was on when the test failed.
+        error_text (str): The captured assertion or exception text.
+        browser_diagnostics (str): The page's browser error log, as
+            :meth:`~utils.page_diagnostics.PageDiagnostics.report` renders it.
+            Required: a recorder that saw nothing still reports that no errors
+            occurred.
+        dom_snapshot (str): The fully rendered HTML of the page at failure time.
     """
 
     test_name: str
@@ -96,14 +112,13 @@ class FailureContext:
 
 
 class ClaudeTestInspector:
-    """Analyzes failed tests with the Claude API and returns a triage report.
+    """Triage failed tests with the Claude API and return a text report.
 
     Args:
-        settings: Resolved framework configuration supplying the credential,
-            the model identifier, and the master enable flag.
-        client: Optional pre-built Anthropic client. Injected by unit tests;
-            production callers leave it unset so the client is created lazily
-            from the configured API key.
+        settings (Settings): The configuration supplying the credential, the
+            model identifier and the enable flag.
+        client (anthropic.Anthropic | None): A pre-built client to use. Left
+            unset, a client is built on first use from the configured key.
     """
 
     def __init__(self, settings: Settings, client: anthropic.Anthropic | None = None) -> None:
@@ -112,34 +127,34 @@ class ClaudeTestInspector:
 
     @property
     def enabled(self) -> bool:
-        """Whether triage calls should be attempted at all.
+        """Return whether triage calls are attempted at all.
 
         Returns:
-            ``True`` when diagnostics are switched on and a credential is
-            available; ``False`` otherwise.
+            bool: True when diagnostics are switched on and a credential is
+            present, False otherwise.
         """
         return self._settings.ai_diagnostics_enabled and self._settings.claude_api_key is not None
 
     @property
     def model(self) -> str:
-        """The Claude model used for triage.
+        """Return the Claude model used for triage.
 
         Returns:
-            The configured model identifier.
+            str: The configured model identifier.
         """
         return self._settings.claude_model
 
     def analyze_failure(self, failure_context: FailureContext) -> str | None:
-        """Produce a root-cause report for one failed test.
+        """Return a root-cause report for one failed test.
 
         Args:
-            failure_context: The failing test, its error text, and the DOM
-                captured at the moment of failure.
+            failure_context (FailureContext): The failing test, its error text,
+                its error log and the DOM captured at failure.
 
         Returns:
-            The triage report as plain text, or ``None`` when diagnostics are
-            disabled, unconfigured, or the API call did not succeed. Callers
-            treat ``None`` as "no extra information available".
+            str | None: The triage report as plain text, or None when
+            diagnostics are disabled or unconfigured, or the API call failed.
+            Callers read None as "no extra information".
         """
         if not self.enabled:
             return None
@@ -147,8 +162,8 @@ class ClaudeTestInspector:
         try:
             response = self._request_analysis(failure_context)
         except anthropic.AnthropicError as api_error:
-            # Diagnostics are advisory. Log and move on so the test report still
-            # shows the real Playwright failure rather than an API problem.
+            # Decided 2026-07-28: diagnostics are advisory. Log and move on, so
+            # the report still shows the real Playwright failure.
             LOGGER.warning(
                 "Claude diagnostics unavailable for %s: %s",
                 failure_context.test_name,
@@ -159,17 +174,17 @@ class ClaudeTestInspector:
         return self._extract_text(response)
 
     def _request_analysis(self, failure_context: FailureContext) -> anthropic.types.Message:
-        """Issue the Claude API call for a single failure.
+        """Return the Messages API response for one failure.
 
         Args:
-            failure_context: The failure being triaged.
+            failure_context (FailureContext): The failure being triaged.
 
         Returns:
-            The raw message returned by the Messages API.
+            anthropic.types.Message: The raw message the API returned.
 
         Raises:
-            anthropic.AnthropicError: If the request cannot be completed. The
-                caller is responsible for downgrading this to a warning.
+            anthropic.AnthropicError: When the request cannot be completed. The
+                caller downgrades it to a warning.
         """
         client = self._resolve_client()
         return client.with_options(timeout=REQUEST_TIMEOUT_SECONDS).messages.create(
@@ -180,10 +195,10 @@ class ClaudeTestInspector:
         )
 
     def _resolve_client(self) -> anthropic.Anthropic:
-        """Return the Anthropic client, constructing it on first use.
+        """Return the Anthropic client, building it on first use.
 
         Returns:
-            A memoized client bound to the configured API key.
+            anthropic.Anthropic: A memoized client bound to the configured key.
         """
         if self._client is None:
             self._client = anthropic.Anthropic(api_key=self._settings.claude_api_key)
@@ -191,20 +206,16 @@ class ClaudeTestInspector:
 
     @staticmethod
     def _bounded(text: str, limit: int, label: str) -> str:
-        """Cap one prompt input, saying so in the text when it was capped.
-
-        A silent truncation is worse than a short input: the model would reason
-        over a partial log or a partial document believing it had the whole one,
-        and could then report with confidence that something is absent when it
-        was merely cut off.
+        """Return one prompt input capped at a limit, noting any cut in the text.
 
         Args:
-            text: The input to bound.
-            limit: Maximum number of characters to keep.
-            label: Name of the input, used in the truncation note.
+            text (str): The input to bound.
+            limit (int): The most characters to keep.
+            label (str): The input's name, used in the truncation note.
 
         Returns:
-            The text, followed by an explicit note when it was shortened.
+            str: The text unchanged when within the limit, otherwise its first
+            ``limit`` characters followed by a note saying it was truncated.
         """
         if len(text) <= limit:
             return text
@@ -212,18 +223,14 @@ class ClaudeTestInspector:
 
     @classmethod
     def _build_prompt(cls, failure_context: FailureContext) -> str:
-        """Render the user turn describing one failure.
-
-        The error log precedes the DOM. It is far smaller and far more likely to
-        name the cause outright, and it is the input that survives intact - the
-        DOM is the one that gets cut when a page is large.
+        """Return the user turn describing one failure.
 
         Args:
-            failure_context: The failure being triaged.
+            failure_context (FailureContext): The failure being triaged.
 
         Returns:
-            A prompt containing the test identity, the error, the bounded
-            browser log, and the bounded DOM snapshot.
+            str: The test name, page URL and error, then the bounded browser
+            error log, then the bounded DOM snapshot, in that order.
         """
         return (
             f"FAILED TEST: {failure_context.test_name}\n"
@@ -238,14 +245,14 @@ class ClaudeTestInspector:
 
     @staticmethod
     def _extract_text(response: anthropic.types.Message) -> str | None:
-        """Concatenate the text blocks of a Claude response.
+        """Return the text blocks of a Claude response joined into one string.
 
         Args:
-            response: The message returned by the Messages API.
+            response (anthropic.types.Message): The message the API returned.
 
         Returns:
-            The joined text content, or ``None`` when the model produced no text
-            block - for example if the response stopped on a refusal.
+            str | None: The joined text, or None when the model produced no text,
+            for example when the response stopped on a refusal.
         """
         text_blocks = [block.text for block in response.content if block.type == "text"]
         joined_text = "\n".join(text_blocks).strip()

@@ -1,10 +1,21 @@
-"""Coverage for the site's shared interactive link styling.
+"""Tests that the site's links share one hover color.
 
-The stylesheet applies one hover color to links across the profile header, the
-project tables, and the copyright footer. This module pins that consistency:
-the footer link is asserted against a table link rather than against a hard
-coded color, so a future re-theme that changes the hover color everywhere
-stays green, while a rule that drifts out of the shared selector list fails.
+Created: 2026-07-28
+Last updated: 2026-11-10
+
+This file contains one test: the copyright footer's owner link hovers to the
+same color as a link in a project table, and hovering visibly changes it.
+
+It runs on the deployment path against the landing page at the desktop
+viewport. A failure means a link has drifted out of the stylesheet's shared
+``a:hover`` rule, or that hovering gives the user no visible feedback.
+
+**Compared against a table link, not a fixed color.** The stylesheet applies
+one hover color across the profile header, the project tables and the footer,
+so a re-theme that changes it everywhere stays green, while a rule that leaves
+the shared selector list fails.
+
+Specified by ``README.md`` section "Coverage Summary".
 """
 
 from __future__ import annotations
@@ -24,10 +35,13 @@ FEATURE_NAME = "Interactive Link Styling"
 @allure.story("The copyright link shares the hover color used in the tables")
 @allure.severity(allure.severity_level.NORMAL)
 def test_footer_owner_link_shares_the_table_hover_color(desktop_page: LandingPage) -> None:
-    """Hovering the footer owner link must tint it like any in-table link.
+    """Assert the footer owner link hovers to a table link's color, and changes.
 
     Args:
-        desktop_page: Landing Page Object at the 1920x1080 viewport.
+        desktop_page (LandingPage): The landing Page Object at 1920x1080.
+
+    Returns:
+        None
     """
     landing_page = desktop_page.navigate()
     footer_link = landing_page.footer_owner_link()

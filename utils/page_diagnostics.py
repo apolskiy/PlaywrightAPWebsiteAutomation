@@ -1,27 +1,41 @@
-"""Recording of the errors a browser reports while a page is open.
+"""Records the errors a browser reports while a page is open, split by origin.
 
-Every Page Object owns one of these. It is a collaborator rather than a set of
-methods on :class:`~pages.base_page.BasePage` for the same reason
-:class:`~utils.link_auditor.LinkAuditor` is one: this is not page interaction.
-Nothing here reads or drives the document. It subscribes to browser events,
-accumulates whatever the browser complains about, and renders that into
-something a human reads after the fact.
+Created: 2026-08-11
+Last updated: 2026-11-10
 
-Two things follow from that separation and are worth stating.
+This file contains ``BrowserEvent``, one recorded complaint carrying its
+category, its description and the URL it came from; ``PageDiagnostics``, the
+recorder that subscribes to a page's console, network, response and
+``pageerror`` events and reports them; and the category constants both use.
 
-**Recording must be armed before navigation.** Playwright only delivers events
-raised after a listener is attached, so a console error thrown during the very
-first load is missed by a listener attached afterwards - silently, which is the
-worst way to miss it. The fixtures therefore arm recording between creating the
-page and handing it to the test.
+Every Page Object owns one recorder, and the fixtures in ``conftest.py`` arm it
+between creating the page and handing it to the test. Tests assert on its
+first-party lists, and on any failure ``conftest.py`` attaches its ``report``
+to Allure and the pytest report and hands it to the Claude diagnostics hook. A
+recorder that was never armed reports so, rather than reporting a clean page.
 
-**First-party and third-party problems are separated, and only the first are
-worth failing a build on.** The site under test embeds CI badge images served by
-GitHub. A badge that 503s is a real observation and belongs in the log, but it
-says nothing about whether this site works, and asserting on it would make every
-test that loads the landing page depend on GitHub being reachable - exactly what
-the ``external`` marker exists to prevent. So both are recorded, both are
-reported, and the assertions are scoped to the origin the site actually controls.
+**It observes and never drives.** Nothing here reads or interacts with the
+document; it collects what the browser complains about and renders it as text,
+which is why it is a collaborator of the Page Object and not a set of
+``BasePage`` methods.
+
+**Recording is armed before navigation.** Playwright delivers only events
+raised after a listener is attached, so an error during the first load is lost
+to a listener attached later. Arming twice is ignored, so no event is counted
+twice.
+
+**First party decides, third party is recorded.** An event is first-party when
+it names no resource or names one on the loaded page's host. Assertions read
+only the first-party lists; third-party events, such as a GitHub badge that
+fails, are still counted and reported. Unhandled JavaScript exceptions are not
+split by origin, since the site chose to run the script that raised them.
+
+**The report keeps the split.** The first-party section is where a failure
+investigation starts, and the third-party section explains an oddity that is
+nobody's bug, so the two are printed separately rather than merged.
+
+Specified by ``README.md`` section "Key Features" (The Browser's Own Error Log,
+Origin-Scoped Assertions) and section "Test Design Principles".
 """
 
 from __future__ import annotations
@@ -32,18 +46,18 @@ from urllib.parse import urlparse
 
 from playwright.sync_api import ConsoleMessage, Page, Request, Response
 
-#: Lowest HTTP status treated as a broken sub-resource.
+#: ERROR STATUS. The lowest HTTP status recorded as a broken sub-resource.
 ERROR_STATUS_THRESHOLD: Final[int] = 400
 
-#: Category labels, used as dictionary keys, in report headings, and in the
-#: assertion messages tests build. Declared once so the three never disagree.
+#: CATEGORY LABELS, used as dictionary keys, report headings and the assertion
+#: messages tests build. Declared once so the three never disagree.
 CONSOLE_ERROR: Final[str] = "console error"
 FAILED_REQUEST: Final[str] = "failed request"
 BROKEN_RESOURCE: Final[str] = "broken resource"
 JAVASCRIPT_ERROR: Final[str] = "javascript error"
 
-#: Every category, ordered by how directly it indicts the page: an unhandled
-#: exception is unambiguous, a sub-resource status is the most circumstantial.
+#: REPORT ORDER. Every category, ordered by how directly it indicts the page:
+#: an unhandled exception first, a sub-resource status last.
 EVENT_CATEGORIES: Final[tuple[str, ...]] = (
     JAVASCRIPT_ERROR,
     CONSOLE_ERROR,
@@ -54,16 +68,14 @@ EVENT_CATEGORIES: Final[tuple[str, ...]] = (
 
 @dataclass(frozen=True)
 class BrowserEvent:
-    """One complaint the browser raised while the page was open.
+    """Hold one complaint the browser raised while the page was open.
 
     Attributes:
-        category: One of the module's category constants.
-        description: Human-readable detail, already formatted for a report.
-        source_url: URL the event originated from, used to tell a problem in
-            this site from a problem at a host it merely embeds. Empty when the
-            browser attributes the event to no particular resource, which is
-            treated as first-party: an unhandled exception with no location came
-            from the document's own scripts.
+        category (str): One of the module's category constants.
+        description (str): The detail, already formatted for a report.
+        source_url (str): The URL the event came from, which decides whether it
+            is first-party. Empty when the browser names no resource, which
+            counts as first-party.
     """
 
     category: str
@@ -72,10 +84,10 @@ class BrowserEvent:
 
 
 class PageDiagnostics:
-    """Subscribes to a page's error events and reports what it collected.
+    """Record a page's error events and report what was collected.
 
     Args:
-        page: The Playwright page to observe.
+        page (Page): The Playwright page to observe.
     """
 
     def __init__(self, page: Page) -> None:
@@ -90,9 +102,10 @@ class PageDiagnostics:
     def record(self) -> None:
         """Subscribe to the browser events that reveal a broken page.
 
-        Safe to call more than once: a second call is ignored rather than
-        registering a duplicate set of listeners, which would report every
-        error twice and make the counts meaningless.
+        A second call is ignored, so no listener is registered twice.
+
+        Returns:
+            None
         """
         if self._is_recording:
             return
@@ -104,12 +117,11 @@ class PageDiagnostics:
 
     @property
     def is_recording(self) -> bool:
-        """Whether listeners are attached.
+        """Return whether listeners are attached.
 
         Returns:
-            ``True`` once :meth:`record` has run. A report from a recorder that
-            was never armed means "nothing was watched", not "nothing happened",
-            and the two must not read the same.
+            bool: True once :meth:`record` has run. A recorder never armed
+            watched nothing, which is not the same as nothing happening.
         """
         return self._is_recording
 
@@ -119,94 +131,88 @@ class PageDiagnostics:
 
     @property
     def events(self) -> list[BrowserEvent]:
-        """Every event recorded so far.
+        """Return every event recorded so far.
 
         Returns:
-            The events in the order the browser raised them.
+            list[BrowserEvent]: The events in the order the browser raised them.
         """
         return list(self._events)
 
     @property
     def javascript_errors(self) -> list[str]:
-        """Unhandled JavaScript exceptions raised by the page.
-
-        Not split by origin: an unhandled exception is raised by a script this
-        site chose to run, whatever host served it.
+        """Return the unhandled JavaScript exceptions the page raised, any origin.
 
         Returns:
-            One entry per ``pageerror`` event.
+            list[str]: One entry per ``pageerror`` event.
         """
         return self._descriptions(JAVASCRIPT_ERROR)
 
     @property
     def console_errors(self) -> list[str]:
-        """Console messages logged at error level, from any origin.
+        """Return the console messages logged at error level, from any origin.
 
         Returns:
-            One entry per ``console.error``, including those a third-party
-            sub-resource provoked.
+            list[str]: One entry per ``console.error``, including those a
+            third-party sub-resource provoked.
         """
         return self._descriptions(CONSOLE_ERROR)
 
     @property
     def failed_requests(self) -> list[str]:
-        """Requests that never completed, from any origin.
+        """Return the requests that never completed, from any origin.
 
         Returns:
-            One entry per network-level failure, such as a DNS or connection
-            error, formatted as ``"<url> (<reason>)"``.
+            list[str]: One entry per network-level failure, such as a DNS or
+            connection error, formatted as ``"<url> (<reason>)"``.
         """
         return self._descriptions(FAILED_REQUEST)
 
     @property
     def broken_resources(self) -> list[str]:
-        """Responses carrying an error status, from any origin.
+        """Return the responses carrying an error status, from any origin.
 
         Returns:
-            One entry per response of 400 or above, formatted as
-            ``"<status> <url>"``. The main document is included, so a caller
-            asserting on the document status separately should expect it here
-            too.
+            list[str]: One entry per response of 400 or above, formatted as
+            ``"<status> <url>"``. The main document is included.
         """
         return self._descriptions(BROKEN_RESOURCE)
 
     @property
     def first_party_console_errors(self) -> list[str]:
-        """Console errors this site is answerable for.
+        """Return the console errors this site is answerable for.
 
         Returns:
-            The subset of :attr:`console_errors` raised by the site's own
-            origin, or by no resource in particular.
+            list[str]: The subset of :attr:`console_errors` raised by the site's
+            own origin, or by no resource in particular.
         """
         return self._descriptions(CONSOLE_ERROR, first_party_only=True)
 
     @property
     def first_party_failed_requests(self) -> list[str]:
-        """Failed requests to this site's own origin.
+        """Return the failed requests addressed to this site's own origin.
 
         Returns:
-            The subset of :attr:`failed_requests` addressed to the site itself.
+            list[str]: The subset of :attr:`failed_requests` sent to the site.
         """
         return self._descriptions(FAILED_REQUEST, first_party_only=True)
 
     @property
     def first_party_broken_resources(self) -> list[str]:
-        """Error responses served by this site's own origin.
+        """Return the error responses served by this site's own origin.
 
         Returns:
-            The subset of :attr:`broken_resources` served by the site itself -
-            a missing stylesheet, icon, or script, rather than an embedded
-            badge whose host is having a bad day.
+            list[str]: The subset of :attr:`broken_resources` served by the site
+            itself, such as a missing stylesheet, icon or script.
         """
         return self._descriptions(BROKEN_RESOURCE, first_party_only=True)
 
     @property
     def third_party_problems(self) -> list[str]:
-        """Everything recorded against a host other than this site's own.
+        """Return everything recorded against a host other than this site's.
 
         Returns:
-            One entry per third-party event, each prefixed with its category so
-            a mixed list stays readable.
+            list[str]: One entry per third-party event, each prefixed with its
+            category.
         """
         return [
             f"[{event.category}] {event.description}"
@@ -219,15 +225,11 @@ class PageDiagnostics:
     # ------------------------------------------------------------------
 
     def counts(self) -> dict[str, int]:
-        """Count what was recorded, by category.
-
-        Every category is present whether or not it fired, so a reader
-        comparing two runs is never left wondering whether a missing line means
-        zero or means the category was not checked.
+        """Return the number of recorded events by category.
 
         Returns:
-            Mapping of category label to the number of events recorded, plus a
-            ``"total"`` entry.
+            dict[str, int]: Every category label, present even at zero so a
+            missing line never reads as unchecked, plus a ``"total"`` entry.
         """
         by_category = {
             category: len(self._descriptions(category)) for category in EVENT_CATEGORIES
@@ -236,11 +238,11 @@ class PageDiagnostics:
         return by_category
 
     def summary(self) -> str:
-        """Render the counts as a single line.
+        """Return the counts rendered as a single line.
 
         Returns:
-            A one-line tally naming only the categories that fired, or a plain
-            statement that the page raised nothing.
+            str: A tally naming only the categories that fired, a statement that
+            the page raised nothing, or a statement that nothing was recorded.
         """
         if not self._is_recording:
             return "Browser diagnostics were not recorded for this page."
@@ -254,16 +256,11 @@ class PageDiagnostics:
         return f"{len(self._events)} browser events recorded: {tally}."
 
     def report(self) -> str:
-        """Render the full diagnostic log as attachable plain text.
-
-        The split by origin is preserved in the output rather than flattened,
-        because the two halves answer different questions: the first-party
-        section is what a failure investigation starts from, and the
-        third-party section is what explains an oddity that is nobody's bug.
+        """Return the full diagnostic log as attachable plain text.
 
         Returns:
-            A multi-line report, suitable for an Allure attachment or a pytest
-            report section.
+            str: The page URL, the summary line, then a first-party section and
+            a third-party section, each printed only when it has entries.
         """
         lines = [
             f"Page: {self._page.url}",
@@ -290,15 +287,15 @@ class PageDiagnostics:
     # ------------------------------------------------------------------
 
     def _descriptions(self, category: str, *, first_party_only: bool = False) -> list[str]:
-        """Collect the descriptions of one category of event.
+        """Return the descriptions of one category of event.
 
         Args:
-            category: The category to filter on.
-            first_party_only: Restrict the result to events this site's own
+            category (str): The category to filter on.
+            first_party_only (bool): Whether to keep only events this site's own
                 origin is answerable for.
 
         Returns:
-            The matching descriptions, in the order they were recorded.
+            list[str]: The matching descriptions, in recorded order.
         """
         return [
             event.description
@@ -308,13 +305,13 @@ class PageDiagnostics:
         ]
 
     def _is_first_party(self, event: BrowserEvent) -> bool:
-        """Decide whether an event belongs to the site under test.
+        """Return whether an event belongs to the site under test.
 
         Args:
-            event: The recorded event.
+            event (BrowserEvent): The recorded event.
 
         Returns:
-            ``True`` when the event names no resource, or names one served by
+            bool: True when the event names no resource, or names one served by
             the same host as the page currently loaded.
         """
         if not event.source_url:
@@ -324,12 +321,14 @@ class PageDiagnostics:
     def _on_console_message(self, message: ConsoleMessage) -> None:
         """Record a console message emitted at error level.
 
-        The message's own location is kept, not the page's. A failing badge
-        image logs its console error against the badge's URL, and that is the
-        only thing distinguishing it from an error in this site's script.
+        The message's own location is kept, not the page's, so an error a badge
+        image logs is attributed to the badge's host.
 
         Args:
-            message: The console message reported by the browser.
+            message (ConsoleMessage): The console message the browser reported.
+
+        Returns:
+            None
         """
         if message.type != "error":
             return
@@ -347,7 +346,10 @@ class PageDiagnostics:
         """Record a request that failed at the network level.
 
         Args:
-            request: The request that never completed.
+            request (Request): The request that never completed.
+
+        Returns:
+            None
         """
         failure_reason = request.failure or "unknown failure"
         self._events.append(
@@ -362,7 +364,10 @@ class PageDiagnostics:
         """Record a response carrying an error status.
 
         Args:
-            response: The response returned for one request.
+            response (Response): The response returned for one request.
+
+        Returns:
+            None
         """
         if response.status < ERROR_STATUS_THRESHOLD:
             return
@@ -375,12 +380,14 @@ class PageDiagnostics:
         )
 
     def _on_page_error(self, error: object) -> None:
-        """Record an unhandled JavaScript exception.
+        """Record an unhandled JavaScript exception as first-party.
 
         Args:
-            error: The ``pageerror`` payload. Typed loosely because the event
-                delivers a JavaScript ``Error`` whose only guaranteed surface is
-                its string representation.
+            error (object): The ``pageerror`` payload, a JavaScript ``Error``
+                whose only guaranteed surface is its string form.
+
+        Returns:
+            None
         """
         self._events.append(
             BrowserEvent(

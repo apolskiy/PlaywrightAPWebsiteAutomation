@@ -1,9 +1,33 @@
-"""Coverage for the site's base64 anti-scraping link and e-mail obfuscation.
+"""Tests for the site's base64 link and e-mail obfuscation.
 
-The application ships every outbound URL as a base64 payload inside a
-``span.enc-link`` placeholder and decodes it on ``DOMContentLoaded``. These
-tests verify both halves of that contract: the decoded state when scripting is
-available, and the ``noscript`` fallback when it is not.
+Created: 2026-07-28
+Last updated: 2026-11-10
+
+This file contains the tests that every encoded placeholder is decoded into an
+anchor; that decoded anchors use safe targets; that no outbound target has
+rotted; that new-tab links carry ``noopener noreferrer``; that the contact
+address is decoded into a ``mailto:`` without appearing as text; that the
+footer owner name decodes into a link; and that a visitor without scripting
+sees the ``noscript`` fallback. It also contains ``is_safe_link_target``, the
+predicate the safe-target test applies to each ``href``.
+
+All but the link-rot test run on the deployment path. A failure there means
+the decoder did not run, produced an unsafe or unhardened link, or exposed the
+address it exists to hide. The link-rot test is marked ``external`` and runs
+weekly; its failure means a published target answers 404 or 410.
+
+**Both halves of the contract are checked.** The site ships every outbound URL
+as a base64 payload in a ``span.enc-link`` placeholder and decodes it on
+``DOMContentLoaded``, so the suite checks the decoded state with scripting and
+the ``noscript`` fallback without it.
+
+**A safe target is absolute or another page of this site.** An ``https`` or
+``mailto`` target passes, and so does a relative link ending in ``.html`` or
+``/``, since the case study is a genuine internal page. A bare fragment fails:
+an in-page jump here is a dead link or a control that should not be an anchor.
+
+Specified by ``README.md`` sections "Key Features" (Outbound Link-Rot
+Detection) and "Coverage Summary".
 """
 
 from __future__ import annotations
@@ -17,27 +41,26 @@ from pages.landing_page import LandingPage
 EPIC_NAME = "Portfolio Website Quality"
 FEATURE_NAME = "Anti-Spam Link Obfuscation"
 
-#: Schemes an outbound anchor is allowed to use once decoding has completed.
+#: SAFE SCHEMES. The schemes a decoded anchor may use.
 ALLOWED_LINK_SCHEMES = ("https://", "mailto:")
 
-#: Suffixes that mark a scheme-less href as a link to another page of this site.
-#: The site publishes every *outbound* target as a base64 payload, but it also
-#: has genuine internal pages (the case study), and those are ordinary relative
-#: links. Bare fragments stay disallowed: an in-page jump here is either a dead
-#: link or a control that should not have been an anchor at all.
+#: INTERNAL PAGES (added 2026-07-29). Suffixes that mark a scheme-less href as
+#: a link to another page of this site, such as the case study. Bare fragments
+#: stay disallowed; the module docstring holds the reason.
 INTERNAL_PAGE_SUFFIXES = (".html", "/")
 
 
 def is_safe_link_target(href: str) -> bool:
-    """Decide whether an anchor's ``href`` is an acceptable target.
+    """Return whether an anchor's ``href`` is an acceptable target.
 
     Args:
-        href: The raw ``href`` attribute value.
+        href (str): The raw ``href`` attribute value.
 
     Returns:
-        True for an absolute ``https``/``mailto`` target or a relative link to
-        another page of this site; False for a bare fragment, a relative path
-        that is not a page, or any other scheme.
+        bool: True for an absolute ``https`` or ``mailto`` target or a relative
+        link to another page of this site; False for a bare fragment, a
+        root-relative path, a relative path that is not a page, or any other
+        scheme.
     """
     if href.startswith(ALLOWED_LINK_SCHEMES):
         return True
@@ -52,10 +75,13 @@ def is_safe_link_target(href: str) -> bool:
 @allure.story("Every obfuscated placeholder is replaced by a real anchor")
 @allure.severity(allure.severity_level.CRITICAL)
 def test_all_placeholders_are_decoded_into_anchors(desktop_page: LandingPage) -> None:
-    """No encoded placeholder may survive once the decoder has run.
+    """Assert no encoded placeholder survives the decoder and anchors appear.
 
     Args:
-        desktop_page: Landing Page Object at the 1920x1080 viewport.
+        desktop_page (LandingPage): The landing Page Object at 1920x1080.
+
+    Returns:
+        None
     """
     landing_page = desktop_page.navigate()
 
@@ -72,10 +98,13 @@ def test_all_placeholders_are_decoded_into_anchors(desktop_page: LandingPage) ->
 @allure.story("Decoded links resolve to absolute, safe URL schemes")
 @allure.severity(allure.severity_level.NORMAL)
 def test_decoded_links_use_absolute_safe_schemes(desktop_page: LandingPage) -> None:
-    """Decoding must yield absolute ``https``/``mailto`` targets, never fragments.
+    """Assert every decoded anchor passes :func:`is_safe_link_target`.
 
     Args:
-        desktop_page: Landing Page Object at the 1920x1080 viewport.
+        desktop_page (LandingPage): The landing Page Object at 1920x1080.
+
+    Returns:
+        None
     """
     landing_page = desktop_page.navigate()
 
@@ -101,21 +130,18 @@ def test_decoded_links_use_absolute_safe_schemes(desktop_page: LandingPage) -> N
 @allure.severity(allure.severity_level.NORMAL)
 @pytest.mark.external
 def test_outbound_links_do_not_rot(desktop_page: LandingPage) -> None:
-    """Each off-site target the page advertises must still exist.
+    """Assert the page advertises outbound targets and none answers 404 or 410.
 
-    A portfolio's links decay silently: a repository is renamed or made private
-    and the page keeps advertising it. This resolves every distinct outbound
-    target and fails only on a definitive "gone" status, so a rate limit or a
-    transient network fault cannot turn link-rot detection into a flaky test.
-
-    Marked ``external``: it is the one test here that depends on third parties
-    being reachable, so it is deselected on the deployment path and run on a
-    schedule instead. Link rot happens over months; checking it on every push
-    would put GitHub and Docker Hub in the critical path of a deploy signal and
-    generate enough request pressure to trip rate limiting on its own.
+    Each distinct off-site target is resolved once. Marked ``external``: it
+    reaches third parties, so it runs weekly rather than on the deployment
+    path. Design: ``README.md`` section "Key Features" (Outbound Link-Rot
+    Detection).
 
     Args:
-        desktop_page: Landing Page Object at the 1920x1080 viewport.
+        desktop_page (LandingPage): The landing Page Object at 1920x1080.
+
+    Returns:
+        None
     """
     landing_page = desktop_page.navigate()
 
@@ -136,10 +162,8 @@ def test_outbound_links_do_not_rot(desktop_page: LandingPage) -> None:
         )
 
     with allure.step("Verify no target reports that it is gone"):
-        # 404/410 are the only statuses that prove the resource is not there.
-        # 401/403/429 mean "reachable but not to an anonymous, unthrottled
-        # caller", and 0 means the request never completed - none of those is
-        # evidence of rot, and failing on them would make this test a liability.
+        # Decided 2026-07-29: only 404 and 410 count as rot. 401, 403, 429 and
+        # 0 (no answer) are not evidence of it, per README "Key Features".
         rotted = {
             target: status for target, status in statuses.items() if status in (404, 410)
         }
@@ -155,10 +179,13 @@ def test_outbound_links_do_not_rot(desktop_page: LandingPage) -> None:
 @allure.story("New-tab links are hardened against reverse tabnabbing")
 @allure.severity(allure.severity_level.NORMAL)
 def test_new_tab_links_declare_noopener_and_noreferrer(desktop_page: LandingPage) -> None:
-    """Every ``target="_blank"`` anchor must carry ``noopener noreferrer``.
+    """Assert new-tab anchors exist and every one carries ``noopener noreferrer``.
 
     Args:
-        desktop_page: Landing Page Object at the 1920x1080 viewport.
+        desktop_page (LandingPage): The landing Page Object at 1920x1080.
+
+    Returns:
+        None
     """
     landing_page = desktop_page.navigate()
 
@@ -183,25 +210,24 @@ def test_new_tab_links_declare_noopener_and_noreferrer(desktop_page: LandingPage
 def test_contact_link_is_decoded_without_exposing_the_address(
     desktop_page: LandingPage,
 ) -> None:
-    """The decoder must produce a working ``mailto:`` with no address in the text.
+    """Assert the contact anchor decodes to a ``mailto:`` absent from the text.
 
-    What this guarantees is narrower than the test name suggests, and the limit
-    is worth stating where the contract lives. The address is asserted to be
-    absent from the *rendered text*, and simultaneously asserted to be present
-    in the ``href`` - because a contact link that does not carry the address is
-    not a contact link. So the browser will show it in the status bar on hover,
-    and devtools will show it outright. That is inherent to a working anchor,
-    not a gap in this check.
+    The guarantee is narrower than the name suggests. The address must be
+    absent from the rendered text and present in the ``href``, since a contact
+    link without the address is not a contact link; the status bar on hover
+    and devtools therefore show it, which is inherent to a working anchor.
 
     The obfuscation defeats scrapers that read HTML without executing it. It
-    does not defeat a headless browser, and base64 is an encoding rather than a
+    does not defeat a headless browser, and base64 is an encoding, not a
     cipher, so it does not defeat a scraper that decodes ``data-`` attributes
-    either. The site's README states the same limit; this docstring exists so
-    the boundary is legible to whoever next reads the assertion and wonders why
-    the address is allowed to sit in the ``href``.
+    either. The site's own README states the same limit; it is restated here
+    so a reader of the assertion sees why the address may sit in the ``href``.
 
     Args:
-        desktop_page: Landing Page Object at the 1920x1080 viewport.
+        desktop_page (LandingPage): The landing Page Object at 1920x1080.
+
+    Returns:
+        None
     """
     landing_page = desktop_page.navigate()
 
@@ -223,10 +249,13 @@ def test_contact_link_is_decoded_without_exposing_the_address(
 @allure.story("The copyright footer links the owner name to a decoded profile")
 @allure.severity(allure.severity_level.NORMAL)
 def test_copyright_footer_owner_name_is_a_decoded_link(desktop_page: LandingPage) -> None:
-    """The footer's owner name must decode into a working outbound anchor.
+    """Assert the footer owner name decodes into an ``https`` anchor.
 
     Args:
-        desktop_page: Landing Page Object at the 1920x1080 viewport.
+        desktop_page (LandingPage): The landing Page Object at 1920x1080.
+
+    Returns:
+        None
     """
     landing_page = desktop_page.navigate()
 
@@ -243,10 +272,14 @@ def test_copyright_footer_owner_name_is_a_decoded_link(desktop_page: LandingPage
 @allure.story("Without scripting the payloads stay encoded and a fallback shows")
 @allure.severity(allure.severity_level.NORMAL)
 def test_scriptless_visitors_see_the_noscript_fallback(scriptless_page: LandingPage) -> None:
-    """With JavaScript disabled, no address is exposed and LinkedIn is offered.
+    """Assert that without scripting, payloads stay encoded and LinkedIn is offered.
 
     Args:
-        scriptless_page: Landing Page Object whose context has scripting off.
+        scriptless_page (LandingPage): The landing Page Object whose context
+            has JavaScript disabled.
+
+    Returns:
+        None
     """
     landing_page = scriptless_page.navigate_without_decoration()
 

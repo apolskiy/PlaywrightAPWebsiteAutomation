@@ -1,9 +1,22 @@
-"""Cross-viewport layout coverage for the desktop and mobile breakpoints.
+"""Tests the landing page layout on both sides of the site's 600px breakpoint.
 
-The site declares a single ``max-width: 600px`` media query. These tests assert
-the observable consequences of that rule on both sides of the breakpoint: tab
-wrapping, header suppression in the skills matrix, and the absence of sideways
-overflow at either size.
+Created: 2026-07-28
+Last updated: 2026-11-10
+
+This file covers seven behaviors, the visible consequences of the site's one
+``max-width: 600px`` media query. At 1920x1080 the tab strip stays on one row,
+the skills matrix keeps its column headers, and no tab overflows sideways. At
+390x844 the tab strip wraps, the matrix headers are hidden, no tab overflows
+sideways, and the stacked profile header keeps its portrait, name and footer.
+
+The cases run on the deployment path. A failure means the stylesheet's
+breakpoint rules regressed, so the page renders the wrong layout at that width
+or scrolls sideways for a reader. The two overflow cases iterate
+``NavigationTab`` inside one case each, so a new tab widens their coverage
+without adding a case.
+
+Specified by ``README.md`` sections "Key Features" (Cross-Viewport Coverage),
+"Defect Found and Fixed" and "Coverage Summary".
 """
 
 from __future__ import annotations
@@ -24,10 +37,13 @@ FEATURE_NAME = "Responsive Cross-Viewport Layout"
 @allure.story("The desktop tab strip renders on a single row")
 @allure.severity(allure.severity_level.CRITICAL)
 def test_desktop_navigation_renders_on_a_single_row(desktop_page: LandingPage) -> None:
-    """At 1920x1080 the flex tab strip must not wrap.
+    """Assert the flex tab strip stays on one row at 1920x1080.
 
     Args:
-        desktop_page: Landing Page Object at the 1920x1080 viewport.
+        desktop_page (LandingPage): The landing Page Object at 1920x1080.
+
+    Returns:
+        None
     """
     landing_page = desktop_page.navigate()
 
@@ -47,10 +63,13 @@ def test_desktop_navigation_renders_on_a_single_row(desktop_page: LandingPage) -
 @allure.story("The desktop skills matrix keeps its column headers")
 @allure.severity(allure.severity_level.NORMAL)
 def test_desktop_skills_matrix_shows_column_headers(desktop_page: LandingPage) -> None:
-    """Above the breakpoint the tabular header row must remain visible.
+    """Assert the skills matrix header row is visible above the breakpoint.
 
     Args:
-        desktop_page: Landing Page Object at the 1920x1080 viewport.
+        desktop_page (LandingPage): The landing Page Object at 1920x1080.
+
+    Returns:
+        None
     """
     landing_page = desktop_page.navigate()
 
@@ -64,10 +83,13 @@ def test_desktop_skills_matrix_shows_column_headers(desktop_page: LandingPage) -
 @allure.story("The desktop layout never scrolls sideways")
 @allure.severity(allure.severity_level.NORMAL)
 def test_desktop_layout_has_no_horizontal_overflow(desktop_page: LandingPage) -> None:
-    """No tab may push the document wider than the desktop viewport.
+    """Assert no tab makes the document wider than the desktop viewport.
 
     Args:
-        desktop_page: Landing Page Object at the 1920x1080 viewport.
+        desktop_page (LandingPage): The landing Page Object at 1920x1080.
+
+    Returns:
+        None
     """
     landing_page = desktop_page.navigate()
 
@@ -86,10 +108,13 @@ def test_desktop_layout_has_no_horizontal_overflow(desktop_page: LandingPage) ->
 @allure.story("The mobile tab strip wraps onto multiple rows")
 @allure.severity(allure.severity_level.CRITICAL)
 def test_mobile_navigation_wraps_onto_multiple_rows(mobile_page: LandingPage) -> None:
-    """Below the breakpoint the tabs must wrap instead of overflowing.
+    """Assert the tab strip wraps onto more than one row below the breakpoint.
 
     Args:
-        mobile_page: Landing Page Object at the 390x844 viewport.
+        mobile_page (LandingPage): The landing Page Object at 390x844.
+
+    Returns:
+        None
     """
     landing_page = mobile_page.navigate()
 
@@ -109,10 +134,15 @@ def test_mobile_navigation_wraps_onto_multiple_rows(mobile_page: LandingPage) ->
 @allure.story("The mobile layout hides the redundant matrix headers")
 @allure.severity(allure.severity_level.NORMAL)
 def test_mobile_skills_matrix_hides_column_headers(mobile_page: LandingPage) -> None:
-    """Once rows stack vertically the column headers add nothing and are hidden.
+    """Assert the skills matrix renders with its header row hidden below the breakpoint.
+
+    Once rows stack vertically the column headers add nothing.
 
     Args:
-        mobile_page: Landing Page Object at the 390x844 viewport.
+        mobile_page (LandingPage): The landing Page Object at 390x844.
+
+    Returns:
+        None
     """
     landing_page = mobile_page.navigate()
 
@@ -129,10 +159,13 @@ def test_mobile_skills_matrix_hides_column_headers(mobile_page: LandingPage) -> 
 @allure.story("The mobile layout never scrolls sideways")
 @allure.severity(allure.severity_level.CRITICAL)
 def test_mobile_layout_has_no_horizontal_overflow(mobile_page: LandingPage) -> None:
-    """Every panel must be constrained to the 390px mobile viewport.
+    """Assert no tab makes the document wider than the 390px mobile viewport.
 
     Args:
-        mobile_page: Landing Page Object at the 390x844 viewport.
+        mobile_page (LandingPage): The landing Page Object at 390x844.
+
+    Returns:
+        None
     """
     landing_page = mobile_page.navigate()
 
@@ -151,10 +184,13 @@ def test_mobile_layout_has_no_horizontal_overflow(mobile_page: LandingPage) -> N
 @allure.story("The mobile profile header stacks without losing content")
 @allure.severity(allure.severity_level.NORMAL)
 def test_mobile_profile_header_remains_complete(mobile_page: LandingPage) -> None:
-    """Stacking the header must keep the portrait, name, and footer visible.
+    """Assert the stacked profile header keeps the portrait, name and footer visible.
 
     Args:
-        mobile_page: Landing Page Object at the 390x844 viewport.
+        mobile_page (LandingPage): The landing Page Object at 390x844.
+
+    Returns:
+        None
     """
     landing_page = mobile_page.navigate()
 

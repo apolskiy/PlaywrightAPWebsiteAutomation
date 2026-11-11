@@ -23,6 +23,31 @@ in the evening in one timezone still agrees with the commit that carries it.
 
 ---
 
+## v1.4.1 - 2026-11-10
+
+### Changed
+
+- **Every comment and docstring follows one standard, the one AP-Harness-QC
+  set for itself.** A module docstring now opens with what the file is, its
+  `Created` and `Last updated` dates, what it contains and what a failure in it
+  means, and ends with the README section that specifies it. Function, fixture
+  and test docstrings are Google style with typed `Args` and a `Returns` that is
+  never omitted, and every test docstring states what it asserts. The reasoning
+  behind a decision moved out of function docstrings: where a README section
+  already held it, the docstring now points there; where none did, it stays in
+  the module docstring rather than being lost. Decision comments carry the date
+  the decision was made. Comments and docstrings only: with them set aside,
+  every file is unchanged, and the suite still collects 93 tests.
+
+### Fixed
+
+- **`utils/visual_comparator.py` described its comparison wrongly.** The text
+  said a pixel counted as changed when its strongest single color channel moved
+  past the tolerance, and called the difference image amplified. The code
+  compares the grayscale luminance of the difference and stores an inverted
+  difference image. The text now says what the code does; the code is
+  unchanged, and no test calls the comparator yet.
+
 ## v1.4.0 - 2026-11-10
 
 ### Added

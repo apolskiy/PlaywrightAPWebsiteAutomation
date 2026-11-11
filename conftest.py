@@ -1,17 +1,55 @@
-"""Pytest fixtures, viewport provisioning, and failure-diagnostics wiring.
+"""Pytest fixtures, hooks and failure-evidence capture for the whole suite.
 
-Every browser context in this suite is created here with an explicit viewport so
-that the responsive assertions in ``tests/test_responsive.py`` are reproducible
-rather than dependent on the host window size.
+Created: 2026-07-28
+Last updated: 2026-11-10
 
-The module also installs the ``pytest_runtest_makereport`` wrapper that, for any
-failing test, attaches to the Allure report: the browser's own error log, a
-full-page screenshot, the fully rendered DOM, a Playwright trace of the whole
-test, and - when enabled - a Claude root-cause analysis. The error log is
-additionally published as a pytest report section, so it appears in the terminal
-summary and in ``reports/pytest-report.html`` for anyone not opening Allure.
-Recording and tracing both run for every test, but neither artifact is written
-unless the test fails, so a green run leaves nothing behind.
+This file contains the session fixtures ``framework_settings``, ``suite_size``
+and ``configure_assertion_timeout``; the per-test page fixtures
+``desktop_page``, ``mobile_page``, ``scriptless_page``, ``desktop_route_page``
+and ``mobile_route_page``; the hooks ``pytest_addoption``, ``pytest_configure``,
+``pytest_collection_modifyitems`` and ``pytest_runtest_makereport``; the
+``DiagnosticsRegistry`` and ``SuiteSizeRegistry`` that carry state from fixtures
+and collection to those hooks, with their ``ActiveSession`` and ``SuiteSize``
+records; and the private helpers that open contexts and attach evidence.
+
+Pytest loads it before any test module. Collection runs through it first, where
+test IDs are published and the suite size is measured; then every test receives
+its page from a fixture here; then, for a failing test, the report hook attaches
+the evidence. A fault here therefore breaks collection, every browser test, or
+every failure report, not one case.
+
+**Every test gets its own context and viewport.** Each fixture opens an isolated
+browser context at an explicit viewport, arms tracing at once, since a trace
+captures only what happens after it starts, and arms the page's error recorder
+before the first navigation. The responsive assertions are reproducible because
+nothing depends on the host window size.
+
+**Evidence is recorded always and written only on failure.** For a failing test
+the report hook attaches, in this order, the browser's error log, a full-page
+screenshot, the rendered DOM, the Playwright trace and, when enabled, a Claude
+root-cause analysis. The error log is also published as a pytest report section,
+so it appears beneath the traceback in the terminal and in
+``reports/pytest-report.html``. A passing test discards its trace and writes
+nothing. Capturing evidence never replaces the real failure: a closed page or a
+failed trace is noted and the test still reports its own error.
+
+**Hooks cannot request fixtures**, so fixtures publish each live session to
+``DIAGNOSTICS_REGISTRY`` by node id and the report hook looks it up there.
+Teardown releases it after the call-phase report has been built.
+
+**The suite is measured before selection.** ``pytest_collection_modifyitems``
+runs ``tryfirst``, ahead of the ``-m`` and ``-k`` filtering pytest applies in
+the same hook, and records the counts for ``test_published_suite_size.py``. A
+run naming specific files or node ids, or selecting more than one browser
+engine, records why its counts cannot be compared with the published figure.
+
+**Output directories exist before anything writes.** ``pytest_configure``
+creates them under the rootdir, not the working directory, so a fresh clone or
+CI runner never fails on a missing directory wherever ``pytest`` was invoked.
+
+Specified by ``README.md`` sections "Test Design Principles", "Reporting" and
+"Test Identity", and the Key Features entry "Published Figures Verify
+Themselves".
 """
 
 from __future__ import annotations
@@ -32,25 +70,27 @@ from pages.landing_page import LandingPage
 from pages.route_page import RoutePage
 from utils.claude_inspector import ClaudeTestInspector, FailureContext
 
-#: Directories the suite writes into. Created up front so a fresh clone, a
-#: cleaned workspace, or a CI runner never fails merely because an output
-#: directory is absent.
+#: CREATED UP FRONT (added 2026-07-29). The directories the suite writes into,
+#: made by ``pytest_configure`` before the session starts.
 ARTIFACT_DIRECTORIES: Final[tuple[str, ...]] = (
     "reports",
     "reports/traces",
     "allure-results",
 )
 
-#: Characters that are unsafe in a filename, replaced when a pytest node id is
-#: turned into a trace file name.
+#: UNSAFE IN A FILENAME. The characters replaced when a pytest node id becomes a
+#: trace file name.
 UNSAFE_FILENAME_PATTERN: Final[re.Pattern[str]] = re.compile(r"[^A-Za-z0-9._-]+")
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
-    """Register the suite's own command-line options.
+    """Register the suite's own command-line option, ``--use-cached-sitemap``.
 
     Args:
-        parser: The pytest option parser.
+        parser (pytest.Parser): The pytest option parser.
+
+    Returns:
+        None
     """
     parser.addoption(
         "--use-cached-sitemap",
@@ -67,13 +107,15 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 def pytest_configure(config: pytest.Config) -> None:
     """Create the report and artifact directories before the session starts.
 
-    Runs once, ahead of collection and ahead of any reporting plugin writing its
-    first file. Paths are resolved against the rootdir rather than the process
-    working directory, so the directories land beside the project no matter
-    where ``pytest`` was invoked from.
+    Runs once, ahead of collection and of any reporting plugin's first write,
+    and resolves every path against the rootdir.
 
     Args:
-        config: The active pytest configuration, used for its rootdir.
+        config (pytest.Config): The active pytest configuration, read for its
+            rootdir.
+
+    Returns:
+        None
     """
     for directory_name in ARTIFACT_DIRECTORIES:
         (config.rootpath / directory_name).mkdir(parents=True, exist_ok=True)
@@ -81,14 +123,15 @@ def pytest_configure(config: pytest.Config) -> None:
 
 @dataclass
 class ActiveSession:
-    """The live browser objects belonging to one running test.
+    """Hold the live browser objects belonging to one running test.
 
     Attributes:
-        page_object: The Page Object driving the test's browser page.
-        context: The browser context that owns the page, and the tracing session.
-        trace_saved: Whether the trace has already been written to disk. Guards
-            against stopping the same tracing session twice, which Playwright
-            rejects.
+        page_object (BasePage): The Page Object driving the test's page.
+        context (BrowserContext): The browser context that owns the page and
+            the tracing session.
+        trace_saved (bool): Whether the trace has been written to disk, which
+            keeps the same tracing session from being stopped twice, an error
+            in Playwright.
     """
 
     page_object: BasePage
@@ -97,11 +140,11 @@ class ActiveSession:
 
 
 class DiagnosticsRegistry:
-    """Tracks the live browser session of each running test for failure capture.
+    """Track the live browser session of each running test, by node id.
 
-    Pytest hooks cannot request fixtures, so the fixtures publish their session
-    here and the ``makereport`` hook looks it up by node id. Entries are removed
-    during fixture teardown, which runs after the call-phase report.
+    Fixtures register a session here and the ``makereport`` hook looks it up.
+    Entries are removed during fixture teardown, after the call-phase report.
+    It also holds the one shared Claude inspector.
     """
 
     def __init__(self) -> None:
@@ -111,18 +154,18 @@ class DiagnosticsRegistry:
     def register_session(
         self, node_id: str, page_object: BasePage, context: BrowserContext
     ) -> ActiveSession:
-        """Associate a browser session with the test that owns it.
+        """Register a browser session under the test that owns it.
 
         Args:
-            node_id: Pytest node identifier of the owning test.
-            page_object: The Page Object driving that test's browser page. Any
-                :class:`~pages.base_page.BasePage` subclass is accepted, so
+            node_id (str): The pytest node id of the owning test.
+            page_object (BasePage): The Page Object driving that test's page.
+                Any :class:`~pages.base_page.BasePage` subclass is accepted, so
                 landing-page and discovered-route tests share one capture path.
-            context: The browser context backing the page.
+            context (BrowserContext): The browser context backing the page.
 
         Returns:
-            The registered session, so the caller can consult ``trace_saved``
-            during teardown.
+            ActiveSession: The registered session, whose ``trace_saved`` the
+            caller reads during teardown.
         """
         session = ActiveSession(page_object=page_object, context=context)
         self._sessions_by_node_id[node_id] = session
@@ -132,19 +175,22 @@ class DiagnosticsRegistry:
         """Forget the session owned by a finished test.
 
         Args:
-            node_id: Pytest node identifier of the finished test.
+            node_id (str): The pytest node id of the finished test.
+
+        Returns:
+            None
         """
         self._sessions_by_node_id.pop(node_id, None)
 
     def session_for(self, node_id: str) -> ActiveSession | None:
-        """Look up the session owned by a test.
+        """Return the session owned by a test.
 
         Args:
-            node_id: Pytest node identifier of the test.
+            node_id (str): The pytest node id of the test.
 
         Returns:
-            The registered session, or ``None`` for tests that never opened a
-            browser page.
+            ActiveSession | None: The registered session, or None for a test
+            that never opened a browser page.
         """
         return self._sessions_by_node_id.get(node_id)
 
@@ -152,10 +198,10 @@ class DiagnosticsRegistry:
         """Return the shared Claude inspector, building it on first use.
 
         Args:
-            settings: Resolved framework configuration.
+            settings (Settings): The resolved framework configuration.
 
         Returns:
-            A process-wide :class:`ClaudeTestInspector` instance.
+            ClaudeTestInspector: The one instance shared by the process.
         """
         if self._inspector is None:
             self._inspector = ClaudeTestInspector(settings)
@@ -165,8 +211,9 @@ class DiagnosticsRegistry:
 DIAGNOSTICS_REGISTRY = DiagnosticsRegistry()
 
 
-#: Explains why a run's collected size cannot be held against a published
-#: figure, when that is the case.
+#: INCOMPARABLE RUNS (added 2026-08-04). Why a run's collected size cannot be
+#: held against a published figure: it named a subset, or it selected more than
+#: one browser engine.
 PARTIAL_COLLECTION_REASON: Final[str] = (
     "This run named specific test files or node ids, so the collected counts "
     "describe a subset and cannot be compared with a figure published for the "
@@ -181,14 +228,14 @@ MULTI_ENGINE_REASON: Final[str] = (
 
 @dataclass(frozen=True)
 class SuiteSize:
-    """How large the suite is, measured before any selection narrowed it.
+    """Hold the suite's size, measured before any selection narrowed it.
 
     Attributes:
-        total: Every test the suite collects.
-        deployment: Tests that run on the deployment path, meaning everything
+        total (int): Every test the suite collects.
+        deployment (int): The tests on the deployment path, meaning everything
             not marked ``external``.
-        incomparable_reason: Why these counts must not be compared against a
-            figure the site publishes, or ``None`` when the comparison is valid.
+        incomparable_reason (str | None): Why these counts must not be compared
+            with a figure the site publishes, or None when the comparison holds.
     """
 
     total: int
@@ -197,7 +244,7 @@ class SuiteSize:
 
 
 class SuiteSizeRegistry:
-    """Carries the collected suite size from the collection hook to a fixture."""
+    """Carry the collected suite size from the collection hook to a fixture."""
 
     def __init__(self) -> None:
         self._size: SuiteSize | None = None
@@ -206,7 +253,10 @@ class SuiteSizeRegistry:
         """Store the measurement taken during collection.
 
         Args:
-            size: The suite size observed before deselection.
+            size (SuiteSize): The suite size observed before deselection.
+
+        Returns:
+            None
         """
         self._size = size
 
@@ -214,10 +264,10 @@ class SuiteSizeRegistry:
         """Return the measurement taken during collection.
 
         Returns:
-            The recorded :class:`SuiteSize`.
+            SuiteSize: The recorded measurement.
 
         Raises:
-            RuntimeError: If read before collection has run.
+            RuntimeError: When read before collection has run.
         """
         if self._size is None:
             raise RuntimeError("Suite size was read before collection completed.")
@@ -229,22 +279,18 @@ SUITE_SIZE_REGISTRY = SuiteSizeRegistry()
 
 @pytest.hookimpl(tryfirst=True)
 def _publish_test_ids(items: list[pytest.Item]) -> None:
-    """Republish each test's assigned ID into every report format this suite emits.
+    """Republish each test's ``test_id`` marker as an Allure label and a JUnit property.
 
-    The ID is authored once as ``@pytest.mark.test_id("PAWA_10001")`` and has to
-    reach two places that do not talk to each other: an Allure label, and a JUnit
-    ``<property>``. Doing it at collection time rather than in a fixture means the
-    label is attached before any reporter has begun building a result, so it
-    cannot be lost to fixture ordering.
-
-    The ID exists because a test's name is not a stable identity. Renaming a test
-    forks its history in any store keyed on the name, silently turning one test
-    with a long record into two with short ones. See
-    PortfolioTestInsights/DESIGN.md section 7.
+    Runs at collection time, so the label is attached before any reporter builds
+    a result. Design: ``README.md`` section "Test Identity", which links
+    PortfolioTestInsights, the consumer.
 
     Args:
-        items: Every collected item, annotated in place. Items carrying no
-            marker are left untouched.
+        items (list[pytest.Item]): Every collected item, annotated in place. An
+            item carrying no marker is left untouched.
+
+    Returns:
+        None
     """
     for item in items:
         marker = item.get_closest_marker("test_id")
@@ -256,16 +302,19 @@ def _publish_test_ids(items: list[pytest.Item]) -> None:
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
-    """Measure the suite before marker or keyword selection removes anything.
+    """Publish test IDs and measure the suite before ``-m`` or ``-k`` removes anything.
 
-    Registered ``tryfirst`` deliberately. Pytest applies ``-m`` and ``-k``
-    filtering inside this same hook, so an implementation running later would
-    measure one run's selection rather than the size of the suite, and the
-    figure published on the site would appear wrong whenever a subset was run.
+    Records the total, the deployment-path count and, for a run naming files or
+    node ids or selecting several engines, why the counts are incomparable.
+    Runs ``tryfirst`` per ``README.md`` Key Features entry "Published Figures
+    Verify Themselves".
 
     Args:
-        config: The active pytest configuration.
-        items: Every collected item, before any deselection.
+        config (pytest.Config): The active pytest configuration.
+        items (list[pytest.Item]): Every collected item, before deselection.
+
+    Returns:
+        None
     """
     _publish_test_ids(items)
 
@@ -273,9 +322,9 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
         str(argument).endswith(".py") or "::" in str(argument)
         for argument in config.invocation_params.args
     )
-    # `--browser` is repeatable, and every browser-scoped test is collected once
-    # per engine. A two-engine run therefore collects roughly twice the suite,
-    # which is a different measurement rather than a drifted one.
+    # Added 2026-08-04: `--browser` is repeatable and each browser-scoped test is
+    # collected once per engine, so a two-engine run measures something else.
+    # README.md section "Quick Start".
     selected_engines = config.getoption("browser", default=None) or []
 
     if names_paths:
@@ -298,30 +347,33 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
 
 @pytest.fixture(name="framework_settings", scope="session")
 def fixture_framework_settings() -> Settings:
-    """Resolve the framework configuration once per test session.
+    """Return the framework configuration, resolved once per session.
 
     Returns:
-        The immutable settings snapshot shared by every fixture and hook.
+        Settings: The frozen snapshot shared by every fixture and hook.
     """
     return Settings.from_env()
 
 
 @pytest.fixture(name="suite_size", scope="session")
 def fixture_suite_size() -> SuiteSize:
-    """Expose the collected suite size to tests that check what the site claims.
+    """Return the collected suite size, for tests that check what the site claims.
 
     Returns:
-        The measurement taken during collection.
+        SuiteSize: The measurement taken during collection.
     """
     return SUITE_SIZE_REGISTRY.current()
 
 
 @pytest.fixture(name="configure_assertion_timeout", scope="session", autouse=True)
 def fixture_configure_assertion_timeout(framework_settings: Settings) -> None:
-    """Apply the configured ceiling to all web-first assertions.
+    """Apply the configured timeout to every web-first assertion.
 
     Args:
-        framework_settings: Resolved framework configuration.
+        framework_settings (Settings): The resolved framework configuration.
+
+    Returns:
+        None
     """
     expect.set_options(timeout=framework_settings.expect_timeout_ms)
 
@@ -329,21 +381,18 @@ def fixture_configure_assertion_timeout(framework_settings: Settings) -> None:
 def _open_context(
     browser: Browser, viewport: dict[str, int], *, javascript_enabled: bool = True
 ) -> BrowserContext:
-    """Create an isolated, tracing browser context with a fixed viewport.
+    """Return a new isolated browser context with a fixed viewport, already tracing.
 
-    A dedicated context per test guarantees a clean cookie jar, storage, and
-    viewport, so tests can run in any order or in parallel without interference.
-    Tracing is armed immediately: a trace can only capture actions that happen
-    after it starts, so it must be running before the test touches the page.
+    Each test gets a clean cookie jar, storage and viewport, and tracing starts
+    before the test touches the page.
 
     Args:
-        browser: The session-scoped Playwright browser.
-        viewport: Viewport geometry applied to the new context.
-        javascript_enabled: Set to ``False`` to exercise a site's ``noscript``
-            fallback path.
+        browser (Browser): The session-scoped Playwright browser.
+        viewport (dict[str, int]): The viewport geometry of the new context.
+        javascript_enabled (bool): False to exercise a ``noscript`` fallback.
 
     Returns:
-        The newly created context. The caller owns closing it.
+        BrowserContext: The new context, which the caller closes.
     """
     context = browser.new_context(
         viewport=viewport,
@@ -358,8 +407,11 @@ def _discard_trace(session: ActiveSession) -> None:
     """Stop tracing without writing an artifact, for a test that passed.
 
     Args:
-        session: The session whose tracing should be torn down. Sessions whose
-            trace was already saved on failure are left alone.
+        session (ActiveSession): The session whose tracing is torn down. One
+            whose trace was already saved on failure is left alone.
+
+    Returns:
+        None
     """
     if session.trace_saved:
         return
@@ -378,20 +430,23 @@ def _provision_landing_page(
     *,
     javascript_enabled: bool = True,
 ) -> Iterator[LandingPage]:
-    """Create an isolated context and yield a landing Page Object.
+    """Open an isolated context and yield a landing Page Object, recording errors.
 
     Args:
-        browser: The session-scoped Playwright browser.
-        framework_settings: Resolved framework configuration.
-        node_id: Pytest node identifier used to register the session for failure
-            diagnostics.
-        viewport: Viewport geometry applied to the new context.
-        javascript_enabled: Set to ``False`` to exercise the site's ``noscript``
-            fallback path.
+        browser (Browser): The session-scoped Playwright browser.
+        framework_settings (Settings): The resolved framework configuration.
+        node_id (str): The pytest node id the session is registered under for
+            failure diagnostics.
+        viewport (dict[str, int]): The viewport geometry of the new context.
+        javascript_enabled (bool): False to exercise the site's ``noscript``
+            fallback.
 
     Yields:
-        A :class:`LandingPage` bound to a fresh, correctly sized page that is
+        LandingPage: A Page Object on a fresh, correctly sized page that is
         already recording browser errors.
+
+    Returns:
+        None
     """
     context = _open_context(browser, viewport, javascript_enabled=javascript_enabled)
     landing_page = LandingPage(context.new_page(), framework_settings.base_url)
@@ -408,22 +463,23 @@ def _provision_landing_page(
 def _provision_route_page(
     browser: Browser, node_id: str, viewport: dict[str, int]
 ) -> Iterator[RoutePage]:
-    """Create an isolated context and yield a diagnostics-recording route page.
+    """Open an isolated context and yield a route Page Object, recording errors.
 
-    Recording is switched on before the page is handed to the test, because
-    Playwright only delivers events raised after a listener is attached - a
-    console error emitted during the very first navigation would otherwise be
-    missed.
+    Recording starts before the page reaches the test, so an error raised during
+    the first navigation is caught.
 
     Args:
-        browser: The session-scoped Playwright browser.
-        node_id: Pytest node identifier used to register the session for failure
-            diagnostics.
-        viewport: Viewport geometry applied to the new context.
+        browser (Browser): The session-scoped Playwright browser.
+        node_id (str): The pytest node id the session is registered under for
+            failure diagnostics.
+        viewport (dict[str, int]): The viewport geometry of the new context.
 
     Yields:
-        A :class:`RoutePage` that is already recording console, network, and
+        RoutePage: A Page Object already recording console, network and
         JavaScript errors.
+
+    Returns:
+        None
     """
     context = _open_context(browser, viewport)
     route_page = RoutePage(context.new_page())
@@ -443,15 +499,18 @@ def fixture_desktop_page(
     framework_settings: Settings,
     request: pytest.FixtureRequest,
 ) -> Iterator[LandingPage]:
-    """Provide a landing page rendered at the desktop viewport (1920x1080).
+    """Yield a landing page at the desktop viewport (1920x1080).
 
     Args:
-        browser: The session-scoped Playwright browser.
-        framework_settings: Resolved framework configuration.
-        request: Pytest request object, used for the owning node id.
+        browser (Browser): The session-scoped Playwright browser.
+        framework_settings (Settings): The resolved framework configuration.
+        request (pytest.FixtureRequest): The request, read for the owning node id.
 
     Yields:
-        A navigated :class:`LandingPage` at desktop dimensions.
+        LandingPage: A Page Object at desktop dimensions, recording errors.
+
+    Returns:
+        None
     """
     yield from _provision_landing_page(
         browser, framework_settings, request.node.nodeid, DESKTOP_VIEWPORT
@@ -464,15 +523,18 @@ def fixture_mobile_page(
     framework_settings: Settings,
     request: pytest.FixtureRequest,
 ) -> Iterator[LandingPage]:
-    """Provide a landing page rendered at the mobile viewport (390x844).
+    """Yield a landing page at the mobile viewport (390x844).
 
     Args:
-        browser: The session-scoped Playwright browser.
-        framework_settings: Resolved framework configuration.
-        request: Pytest request object, used for the owning node id.
+        browser (Browser): The session-scoped Playwright browser.
+        framework_settings (Settings): The resolved framework configuration.
+        request (pytest.FixtureRequest): The request, read for the owning node id.
 
     Yields:
-        A navigated :class:`LandingPage` at mobile dimensions.
+        LandingPage: A Page Object at mobile dimensions, recording errors.
+
+    Returns:
+        None
     """
     yield from _provision_landing_page(
         browser, framework_settings, request.node.nodeid, MOBILE_VIEWPORT
@@ -485,18 +547,21 @@ def fixture_scriptless_page(
     framework_settings: Settings,
     request: pytest.FixtureRequest,
 ) -> Iterator[LandingPage]:
-    """Provide a desktop landing page with JavaScript disabled.
+    """Yield a desktop landing page with JavaScript disabled.
 
-    Used to prove the anti-scraping fallback: without scripting the obfuscated
-    placeholders must stay encoded and the ``noscript`` contact link must show.
+    The anti-scraping fallback test uses it: without scripting the obfuscated
+    placeholders stay encoded and the ``noscript`` contact link shows.
 
     Args:
-        browser: The session-scoped Playwright browser.
-        framework_settings: Resolved framework configuration.
-        request: Pytest request object, used for the owning node id.
+        browser (Browser): The session-scoped Playwright browser.
+        framework_settings (Settings): The resolved framework configuration.
+        request (pytest.FixtureRequest): The request, read for the owning node id.
 
     Yields:
-        A :class:`LandingPage` whose context has scripting switched off.
+        LandingPage: A Page Object whose context has scripting switched off.
+
+    Returns:
+        None
     """
     yield from _provision_landing_page(
         browser,
@@ -511,14 +576,17 @@ def fixture_scriptless_page(
 def fixture_desktop_route_page(
     browser: Browser, request: pytest.FixtureRequest
 ) -> Iterator[RoutePage]:
-    """Provide a diagnostics-recording route page at the desktop viewport.
+    """Yield a route page at the desktop viewport, recording errors.
 
     Args:
-        browser: The session-scoped Playwright browser.
-        request: Pytest request object, used for the owning node id.
+        browser (Browser): The session-scoped Playwright browser.
+        request (pytest.FixtureRequest): The request, read for the owning node id.
 
     Yields:
-        A :class:`RoutePage` at 1920x1080, recording from the outset.
+        RoutePage: A Page Object at 1920x1080, recording from the outset.
+
+    Returns:
+        None
     """
     yield from _provision_route_page(browser, request.node.nodeid, DESKTOP_VIEWPORT)
 
@@ -527,14 +595,17 @@ def fixture_desktop_route_page(
 def fixture_mobile_route_page(
     browser: Browser, request: pytest.FixtureRequest
 ) -> Iterator[RoutePage]:
-    """Provide a diagnostics-recording route page at the mobile viewport.
+    """Yield a route page at the mobile viewport, recording errors.
 
     Args:
-        browser: The session-scoped Playwright browser.
-        request: Pytest request object, used for the owning node id.
+        browser (Browser): The session-scoped Playwright browser.
+        request (pytest.FixtureRequest): The request, read for the owning node id.
 
     Yields:
-        A :class:`RoutePage` at 390x844, recording from the outset.
+        RoutePage: A Page Object at 390x844, recording from the outset.
+
+    Returns:
+        None
     """
     yield from _provision_route_page(browser, request.node.nodeid, MOBILE_VIEWPORT)
 
@@ -543,17 +614,17 @@ def fixture_mobile_route_page(
 def pytest_runtest_makereport(
     item: pytest.Item, call: pytest.CallInfo
 ) -> Generator[None, pytest.TestReport, pytest.TestReport]:
-    """Attach failure diagnostics to the Allure report for failing tests.
+    """Attach failure evidence to the reports of a test failing in its call phase.
 
     Args:
-        item: The test item being reported on.
-        call: The phase result produced by pytest.
+        item (pytest.Item): The test item being reported on.
+        call (pytest.CallInfo): The phase result produced by pytest.
 
     Yields:
-        Control back to pytest so the downstream hooks build the report.
+        None: Control back to pytest, so the wrapped hooks build the report.
 
     Returns:
-        The report produced by the wrapped hook implementations, unmodified.
+        pytest.TestReport: The report the wrapped hooks built, unmodified.
     """
     report = yield
     if report.when == "call" and report.failed:
@@ -563,15 +634,14 @@ def pytest_runtest_makereport(
 
 
 def _browser_diagnostics_text(page_object: BasePage) -> str:
-    """Render one page's recorded browser errors, tolerating a closed page.
+    """Return one page's recorded browser errors as text, tolerating a closed page.
 
     Args:
-        page_object: The Page Object driving the failing test.
+        page_object (BasePage): The Page Object driving the failing test.
 
     Returns:
-        The rendered diagnostic report, or a note explaining why it could not
-        be read. Evidence collection must never replace a real failure with a
-        different one.
+        str: The rendered diagnostic report, or a note saying why it could not
+        be read. It never raises, so the real failure stays the reported one.
     """
     try:
         return page_object.diagnostics.report()
@@ -580,16 +650,17 @@ def _browser_diagnostics_text(page_object: BasePage) -> str:
 
 
 def _publish_browser_diagnostics(item: pytest.Item, report: pytest.TestReport) -> None:
-    """Attach the browser's error log to the pytest report as a section.
+    """Append the browser's error log to the pytest report as a section.
 
-    Allure is the richer report, but it is not always the one being read - a CI
-    log and ``reports/pytest-report.html`` are both closer to hand. A pytest
-    section reaches all three, and appears directly beneath the traceback of
-    the test it belongs to.
+    The section appears beneath the traceback in the terminal, the CI log and
+    ``reports/pytest-report.html``, per ``README.md`` section "Reporting".
 
     Args:
-        item: The failing test item.
-        report: The report being built for it.
+        item (pytest.Item): The failing test item.
+        report (pytest.TestReport): The report being built for it.
+
+    Returns:
+        None
     """
     session = DIAGNOSTICS_REGISTRY.session_for(item.nodeid)
     if session is None:
@@ -600,15 +671,17 @@ def _publish_browser_diagnostics(item: pytest.Item, report: pytest.TestReport) -
 
 
 def _render_failure(call: pytest.CallInfo, report: pytest.TestReport) -> str:
-    """Render a failure into the plain text handed to the AI inspector.
+    """Return a failure as the plain text handed to the AI inspector.
 
     Args:
-        call: The phase result carrying the captured exception, if any.
-        report: The report holding the fallback long representation.
+        call (pytest.CallInfo): The phase result carrying the captured
+            exception, if any.
+        report (pytest.TestReport): The report holding the fallback long
+            representation.
 
     Returns:
-        A short-style traceback when an exception was captured, otherwise the
-        report's own long representation.
+        str: A short-style traceback when an exception was captured, otherwise
+        the report's own long representation.
     """
     if call.excinfo is not None:
         return str(call.excinfo.getrepr(style="short"))
@@ -616,24 +689,29 @@ def _render_failure(call: pytest.CallInfo, report: pytest.TestReport) -> str:
 
 
 def _trace_path(item: pytest.Item) -> Path:
-    """Build the on-disk location of one test's Playwright trace.
+    """Return the on-disk location of one test's Playwright trace.
 
     Args:
-        item: The failing test item.
+        item (pytest.Item): The failing test item.
 
     Returns:
-        A path under ``reports/traces`` whose name is derived from the node id.
+        Path: A ``.zip`` path under ``reports/traces`` named from the node id.
     """
     safe_name = UNSAFE_FILENAME_PATTERN.sub("_", item.nodeid).strip("_")
     return item.config.rootpath / "reports" / "traces" / f"{safe_name}.zip"
 
 
 def _attach_trace(item: pytest.Item, session: ActiveSession) -> None:
-    """Stop tracing, write the artifact, and attach it to the Allure report.
+    """Stop tracing, write the trace, and attach it to the Allure report.
+
+    A trace that cannot be written is replaced by a text attachment saying why.
 
     Args:
-        item: The failing test item.
-        session: The failing test's live browser session.
+        item (pytest.Item): The failing test item.
+        session (ActiveSession): The failing test's live browser session.
+
+    Returns:
+        None
     """
     if session.trace_saved:
         return
@@ -648,8 +726,8 @@ def _attach_trace(item: pytest.Item, session: ActiveSession) -> None:
             extension="zip",
         )
     except (PlaywrightError, OSError) as trace_error:
-        # A trace is a nice-to-have. Never let capturing evidence become the
-        # reason a test reports something other than its real failure.
+        # Decided 2026-07-29: a trace is optional evidence, and capturing it must
+        # never make a test report something other than its real failure.
         allure.attach(
             f"Playwright trace could not be captured: {trace_error}",
             name="Trace capture failed",
@@ -658,25 +736,27 @@ def _attach_trace(item: pytest.Item, session: ActiveSession) -> None:
 
 
 def _attach_failure_diagnostics(item: pytest.Item, error_text: str) -> None:
-    """Capture page evidence and an optional AI triage report for a failure.
+    """Attach the error log, screenshot, DOM, trace and optional AI triage for a failure.
 
-    Diagnostics are best-effort: a browser that already closed must not convert
-    a genuine assertion failure into a confusing collection error.
+    Best effort: when the page is already closed, the error log is still
+    attached and the rest is skipped, so the real failure stays the reported one.
 
     Args:
-        item: The failing test item.
-        error_text: Rendered representation of the failure.
+        item (pytest.Item): The failing test item.
+        error_text (str): The rendered failure.
+
+    Returns:
+        None
     """
     session = DIAGNOSTICS_REGISTRY.session_for(item.nodeid)
     if session is None:
         return
     page_object = session.page_object
 
-    # Read and attached first, and outside the capture block below: the events
-    # are already in memory, so this is the one piece of evidence that survives
-    # a page which has closed under the test. The same text is handed to the
-    # inspector further down, so the report a human reads and the log the model
-    # reasons from cannot disagree.
+    # Added 2026-08-11: read and attached first, outside the capture block, since
+    # the events are in memory and survive a closed page (README.md section
+    # "Reporting"). The inspector gets the same text, so the human's report and
+    # the model's input cannot disagree.
     browser_diagnostics = _browser_diagnostics_text(page_object)
     allure.attach(
         browser_diagnostics,

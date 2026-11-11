@@ -1,9 +1,27 @@
-"""Pillow-backed pixel comparison used for optional visual regression checks.
+"""Compares screenshots against stored baselines within a pixel tolerance.
 
-The comparator is deliberately threshold-based rather than exact: anti-aliasing
-of web fonts differs between browser builds and operating systems, so a strict
-byte comparison of two screenshots is guaranteed to be flaky. Callers supply the
-per-channel tolerance and the maximum acceptable share of differing pixels.
+Created: 2026-07-28
+Last updated: 2026-11-10
+
+This file contains ``VisualComparator``, which stores approved baseline PNGs,
+compares a screenshot against one and encodes a difference image, and
+``ComparisonResult``, the outcome it returns: whether the images matched, the
+share of pixels that differ and, on a mismatch, the difference image.
+
+No test uses it yet. It is exported by ``utils`` for a visual regression check
+to call with a screenshot from a Page Object; a mismatch would then be that
+check's failure, with the difference image as its evidence.
+
+**Threshold-based, not exact.** Web font anti-aliasing differs between browser
+builds and operating systems, so a byte comparison of two screenshots would be
+flaky. A pixel counts as changed when the grayscale luminance of its RGB
+difference exceeds the channel tolerance, and the comparison matches while the
+share of changed pixels stays at or below the allowed ratio.
+
+**A size change is a total mismatch.** A resized canvas is a layout failure in
+its own right, so it is reported as a ratio of ``1.0`` rather than cropped.
+
+Specified by ``README.md`` section "Project Architecture".
 """
 
 from __future__ import annotations
@@ -14,23 +32,23 @@ from pathlib import Path
 
 from PIL import Image, ImageChops
 
-#: Per-channel intensity difference below which two pixels are treated as equal.
+#: NOISE FLOOR. The difference intensity at or below which a pixel is unchanged.
 DEFAULT_CHANNEL_TOLERANCE: int = 12
 
-#: Share of differing pixels tolerated before a comparison is reported as failed.
+#: TOLERATED SHARE of changed pixels before a comparison fails.
 DEFAULT_MAX_DIFF_RATIO: float = 0.01
 
 
 @dataclass(frozen=True)
 class ComparisonResult:
-    """Outcome of comparing a candidate screenshot against its baseline.
+    """Hold the outcome of comparing a screenshot against its baseline.
 
     Attributes:
-        matched: Whether the candidate stayed within the configured tolerance.
-        diff_ratio: Share of pixels that differ beyond the channel tolerance,
-            in the range ``0.0`` to ``1.0``.
-        diff_png: PNG-encoded amplified difference image, or ``None`` when the
-            two images matched and no diff was produced.
+        matched (bool): Whether the screenshot stayed within the tolerance.
+        diff_ratio (float): The share of pixels changed beyond the tolerance,
+            from ``0.0`` to ``1.0``.
+        diff_png (bytes | None): A PNG of the inverted difference image, or None
+            when the images matched or differed in size.
     """
 
     matched: bool
@@ -39,13 +57,13 @@ class ComparisonResult:
 
 
 class VisualComparator:
-    """Compares screenshots against stored baselines with a pixel tolerance.
+    """Compare screenshots against stored baselines with a pixel tolerance.
 
     Args:
-        baseline_directory: Directory holding the approved baseline PNG files.
-        channel_tolerance: Per-channel intensity delta treated as noise.
-        max_diff_ratio: Maximum share of differing pixels that still counts as a
-            match.
+        baseline_directory (Path): The directory holding approved baseline PNGs.
+        channel_tolerance (int): The difference intensity treated as noise.
+        max_diff_ratio (float): The largest share of changed pixels that still
+            counts as a match.
     """
 
     def __init__(
@@ -59,36 +77,36 @@ class VisualComparator:
         self._max_diff_ratio = max_diff_ratio
 
     def baseline_path(self, baseline_name: str) -> Path:
-        """Resolve the on-disk location of one baseline image.
+        """Return the on-disk location of one baseline image.
 
         Args:
-            baseline_name: Logical name of the baseline, without extension.
+            baseline_name (str): The baseline's name, without extension.
 
         Returns:
-            The full path to the baseline PNG file.
+            Path: The full path to the baseline PNG.
         """
         return self._baseline_directory / f"{baseline_name}.png"
 
     def has_baseline(self, baseline_name: str) -> bool:
-        """Report whether a baseline has been approved already.
+        """Return whether a baseline has been approved already.
 
         Args:
-            baseline_name: Logical name of the baseline, without extension.
+            baseline_name (str): The baseline's name, without extension.
 
         Returns:
-            ``True`` when the baseline file exists on disk.
+            bool: True when the baseline file exists on disk.
         """
         return self.baseline_path(baseline_name).is_file()
 
     def save_baseline(self, baseline_name: str, screenshot_png: bytes) -> Path:
-        """Persist a screenshot as the approved baseline.
+        """Write a screenshot as the approved baseline.
 
         Args:
-            baseline_name: Logical name of the baseline, without extension.
-            screenshot_png: PNG-encoded screenshot bytes to store.
+            baseline_name (str): The baseline's name, without extension.
+            screenshot_png (bytes): The PNG-encoded screenshot to store.
 
         Returns:
-            The path the baseline was written to.
+            Path: The path the baseline was written to.
         """
         self._baseline_directory.mkdir(parents=True, exist_ok=True)
         target_path = self.baseline_path(baseline_name)
@@ -96,17 +114,18 @@ class VisualComparator:
         return target_path
 
     def compare(self, baseline_name: str, screenshot_png: bytes) -> ComparisonResult:
-        """Compare a screenshot against its stored baseline.
+        """Return the result of comparing a screenshot against its baseline.
 
         Args:
-            baseline_name: Logical name of the baseline, without extension.
-            screenshot_png: PNG-encoded screenshot captured during the test.
+            baseline_name (str): The baseline's name, without extension.
+            screenshot_png (bytes): The PNG-encoded screenshot from the test.
 
         Returns:
-            A :class:`ComparisonResult` describing the outcome.
+            ComparisonResult: The outcome; a size difference is a mismatch with
+            a ratio of ``1.0`` and no difference image.
 
         Raises:
-            FileNotFoundError: If no baseline has been approved for that name.
+            FileNotFoundError: When no baseline has been approved for the name.
         """
         baseline_file = self.baseline_path(baseline_name)
         if not baseline_file.is_file():
@@ -119,8 +138,8 @@ class VisualComparator:
         ) as candidate_image:
             baseline_rgb = baseline_image.convert("RGB")
             candidate_rgb = candidate_image.convert("RGB")
-            # A resized viewport changes the canvas, which is a layout failure in
-            # its own right - report it as a total mismatch rather than cropping.
+            # Decided 2026-07-28: a resized canvas is a layout failure in its own
+            # right, reported as a total mismatch rather than cropped.
             if baseline_rgb.size != candidate_rgb.size:
                 return ComparisonResult(matched=False, diff_ratio=1.0, diff_png=None)
             return self._compare_same_size(baseline_rgb, candidate_rgb)
@@ -128,18 +147,19 @@ class VisualComparator:
     def _compare_same_size(
         self, baseline_rgb: Image.Image, candidate_rgb: Image.Image
     ) -> ComparisonResult:
-        """Compare two equally sized RGB images.
+        """Return the result of comparing two equally sized RGB images.
 
         Args:
-            baseline_rgb: The approved baseline, already converted to RGB.
-            candidate_rgb: The captured screenshot, already converted to RGB.
+            baseline_rgb (Image.Image): The approved baseline, in RGB.
+            candidate_rgb (Image.Image): The captured screenshot, in RGB.
 
         Returns:
-            A :class:`ComparisonResult` describing the outcome.
+            ComparisonResult: The outcome, with an inverted difference image on
+            a mismatch.
         """
         difference_image = ImageChops.difference(baseline_rgb, candidate_rgb)
-        # Collapse the three channels to the strongest single-channel delta so a
-        # pixel counts as changed if any one channel moved beyond the tolerance.
+        # Collapse the three channels to one grayscale luminance value per pixel;
+        # a pixel counts as changed when that value exceeds the tolerance.
         max_channel_delta = difference_image.convert("L")
         changed_pixel_count = sum(
             pixel_count
@@ -159,13 +179,13 @@ class VisualComparator:
 
     @staticmethod
     def _encode_png(image: Image.Image) -> bytes:
-        """Encode a Pillow image as PNG bytes.
+        """Return a Pillow image encoded as PNG bytes.
 
         Args:
-            image: The image to encode.
+            image (Image.Image): The image to encode.
 
         Returns:
-            The PNG-encoded representation, ready to attach to a report.
+            bytes: The PNG encoding, ready to attach to a report.
         """
         buffer = io.BytesIO()
         image.save(buffer, format="PNG")

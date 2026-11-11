@@ -1,17 +1,44 @@
-"""Auditing of the links a page publishes, separately from the page itself.
+"""Collects, classifies and resolves the links a page publishes.
 
-This is the one part of the landing-page interaction that is not page
-interaction. Everything else a Page Object exposes reads or drives the document
-in front of it; these operations issue real HTTP requests to third-party hosts
-and merely borrow the browser's request context to do it. That is a different
-responsibility with a different failure mode - a rate limiter, a host that is
-down, a redirect chain - and it carries state the page has no business owning:
-the per-host clock that keeps this suite from tripping the limits it is trying
-to observe.
+Created: 2026-08-09
+Last updated: 2026-11-10
 
-Using the browser's request context rather than a separate HTTP client is
-deliberate. It adds no dependency and inherits the browser's redirect handling,
-so a target that a real visitor would reach is reported as reachable here.
+This file contains ``LinkAuditor``, which collects every anchor in a document,
+lists its distinct outbound targets, counts the anchors opening a new tab and
+those missing ``noopener noreferrer``, and resolves a URL to the HTTP status a
+real client would receive. Two constants set the per-host request gap and the
+request timeout.
+
+``LandingPage`` owns one auditor as its ``links`` attribute, and the link
+checks in ``test_link_obfuscation.py`` read through it. The resolving half
+sends real requests to third parties and runs only in the weekly ``external``
+check, so a failure there reports link rot and never decides a deploy.
+
+**Anchors are located by CSS, not by the ``link`` role**, so the anchors of
+hidden tab panels are included; the role misses everything under
+``display: none``.
+
+**Outbound means off-site, plus foreign reports on this host.** ``https``
+targets on another host are outbound, and so are the paths listed in
+``FOREIGN_REPORT_PATH_PREFIXES``, which the crawler leaves alone. Internal page
+links and ``mailto:`` are excluded.
+
+**Resolution tries ``HEAD`` first and confirms with ``GET``.** ``HEAD`` is
+tried first because the bodies here are large: resolving this site's links
+with ``GET`` alone transfers several megabytes of HTML that is discarded. Any
+answer that is not a clean success is re-checked with ``GET``, and that answer
+is reported. A request that cannot complete returns ``0``, so a dead network
+reads differently from a dead link.
+
+**Requests go through the browser's own request context**, not a separate HTTP
+client. That adds no dependency and inherits the browser's redirect handling,
+so a target a real visitor would reach is reported as reachable.
+
+**Requests to one host are paced; different hosts are not.** Unpaced, the
+batch trips GitHub's rate limiter, which answers ``429`` on an arbitrary subset.
+
+Specified by ``README.md`` section "Key Features" (Outbound Link-Rot Detection
+and Link Auditing Covers Hidden Panels).
 """
 
 from __future__ import annotations
@@ -24,20 +51,20 @@ from playwright.sync_api import Error as PlaywrightError, Locator, Page
 
 from config.settings import FOREIGN_REPORT_PATH_PREFIXES
 
-#: Minimum gap between consecutive requests to the same host, in seconds.
-#: Resolving one host's links back-to-back is enough to trip its rate limiter.
+#: PACED PER HOST, per ``README.md`` section "Key Features" (added 2026-07-30).
+#: The least gap between consecutive requests to the same host, in seconds.
 OUTBOUND_REQUEST_INTERVAL_SECONDS: Final[float] = 0.4
 
-#: Ceiling on a single outbound request, in milliseconds.
+#: BOUNDED. The ceiling of one outbound request, in milliseconds.
 OUTBOUND_REQUEST_TIMEOUT_MS: Final[int] = 20_000
 
 
 class LinkAuditor:
-    """Collects, classifies, and resolves the links a document publishes.
+    """Collect, classify and resolve the links a document publishes.
 
     Args:
-        page: The Playwright page whose document is being audited.
-        base_url: Absolute URL of the application, used to tell an internal
+        page (Page): The Playwright page whose document is audited.
+        base_url (str): The application's absolute URL, which tells an internal
             target from an outbound one.
     """
 
@@ -51,31 +78,24 @@ class LinkAuditor:
     # ------------------------------------------------------------------
 
     def anchors(self) -> Locator:
-        """Locate every anchor in the document, including hidden panels.
+        """Return a locator for every anchor in the document, hidden panels included.
 
-        A CSS locator is used here rather than the ``link`` role, and that is
-        deliberate. The target is a tabbed single-page application: every panel
-        except the active one is ``display: none``, which removes its contents
-        from the accessibility tree, so a role-based locator returns only the
-        anchors of whichever tab happens to be open - on first load, the profile
-        header and the footer alone.
-
-        Link auditing has to cover what the document publishes, not what is
-        currently painted, or the project links are never inspected at all. This
-        is not hypothetical: the check passed for weeks while inspecting 2 of the
-        16 targets the page actually ships.
+        A CSS locator, so anchors inside ``display: none`` panels are found;
+        the reason is in ``README.md`` section "Key Features" (Link Auditing
+        Covers Hidden Panels).
 
         Returns:
-            A locator resolving to every anchor in the document.
+            Locator: Every anchor in the document.
         """
         return self._page.locator("a")
 
     def published_hrefs(self) -> list[str]:
-        """Collect the ``href`` of every anchor on the page.
+        """Return the ``href`` of every anchor on the page.
 
         Returns:
-            One entry per anchor, in document order. Anchors without an ``href``
-            contribute an empty string so the caller can flag them.
+            list[str]: One entry per anchor, in document order. An anchor
+            without an ``href`` contributes an empty string, so the caller can
+            flag it.
         """
         anchors = self.anchors()
         return [
@@ -84,15 +104,13 @@ class LinkAuditor:
         ]
 
     def outbound_targets(self) -> list[str]:
-        """Collect the distinct off-site ``https`` targets published by the page.
+        """Return the distinct outbound ``https`` targets the page publishes.
 
         Returns:
-            Unique absolute targets whose host differs from the application's
-            own, in first-seen order, plus the reports other projects publish on
-            this same host, which the crawler deliberately leaves alone and which
-            would otherwise be checked by nothing. Internal page links and
-            ``mailto:`` are excluded: the crawler covers the first, and neither
-            can rot in a way an HTTP status would reveal.
+            list[str]: Unique absolute targets in first-seen order: those on
+            another host, plus those on this host under
+            ``FOREIGN_REPORT_PATH_PREFIXES``. Internal page links and
+            ``mailto:`` are excluded.
         """
         own_host = urlparse(self._base_url).netloc
         seen: dict[str, None] = {}
@@ -108,19 +126,19 @@ class LinkAuditor:
         return list(seen)
 
     def new_tab_count(self) -> int:
-        """Count anchors that the decoder marked as opening in a new tab.
+        """Return how many anchors the decoder marked as opening in a new tab.
 
         Returns:
-            The number of anchors carrying ``target="_blank"``.
+            int: The number of anchors carrying ``target="_blank"``.
         """
         return self._page.locator('a[target="_blank"]').count()
 
     def unhardened_new_tab_count(self) -> int:
-        """Count new-tab anchors missing the ``noopener noreferrer`` hardening.
+        """Return how many new-tab anchors lack ``noopener noreferrer``.
 
         Returns:
-            The number of ``target="_blank"`` anchors whose ``rel`` attribute
-            omits either ``noopener`` or ``noreferrer``. A non-zero result is a
+            int: The number of ``target="_blank"`` anchors whose ``rel`` omits
+            ``noopener`` or ``noreferrer``. Anything above zero is a
             reverse-tabnabbing exposure.
         """
         return self._page.locator(
@@ -133,24 +151,17 @@ class LinkAuditor:
     # ------------------------------------------------------------------
 
     def url_status(self, url: str) -> int:
-        """Resolve one URL, preferring ``HEAD`` and confirming with ``GET``.
+        """Return the status of one URL, trying ``HEAD`` and confirming with ``GET``.
 
-        ``HEAD`` is tried first because the bodies here are large - resolving
-        this site's links with ``GET`` transfers several megabytes of HTML that
-        is discarded immediately.
-
-        ``HEAD`` support is not universal, though, and a status derived from it
-        alone is not trustworthy enough to fail a build on. Measured against the
-        targets this site publishes, LinkedIn answers ``405`` to ``HEAD`` while
-        answering ``GET``. So the method is only an optimisation for the happy
-        path: anything that is not a clean success is re-checked with ``GET``,
-        and it is that second answer which is reported.
+        A ``HEAD`` answer from 200 to 399 is returned as is; any other answer
+        is re-checked with ``GET``, and that answer is returned.
 
         Args:
-            url: An absolute URL.
+            url (str): An absolute URL.
 
         Returns:
-            The status a real client would receive.
+            int: The status a real client would receive, or ``0`` when the
+            request could not complete.
         """
         status = self._issue_request(url, "head")
         if 200 <= status < 400:
@@ -158,16 +169,16 @@ class LinkAuditor:
         return self._issue_request(url, "get")
 
     def _issue_request(self, url: str, method: str) -> int:
-        """Issue one request through the browser's own request context.
+        """Return the status of one request sent through the browser's context.
 
         Args:
-            url: An absolute URL.
-            method: ``"head"`` or ``"get"``.
+            url (str): An absolute URL.
+            method (str): ``"head"`` or ``"get"``.
 
         Returns:
-            The final status code, or ``0`` when the request could not be
-            completed at all - a caller cannot distinguish a dead link from a
-            dead network without that difference.
+            int: The final status code, or ``0`` when the request could not
+            complete at all, so a dead network reads differently from a dead
+            link.
         """
         self._pace_request(url)
         try:
@@ -179,21 +190,17 @@ class LinkAuditor:
             return 0
 
     def _pace_request(self, url: str) -> None:
-        """Hold a minimum gap between consecutive requests to the *same* host.
+        """Wait until the URL's host is one request interval past its last request.
 
-        Resolving every published link back-to-back is enough to trip GitHub's
-        rate limiter, which answers ``429`` on an arbitrary subset of the batch
-        and turns a link check into a source of noise.
-
-        The limit being respected is per-host, so the delay is tracked per-host
-        too. A global delay would make every target wait on every other, which
-        both wastes time and protects nothing: a request to Docker Hub does
-        nothing to GitHub's budget. Measured over this site's links, scoping the
-        delay per-host cut the batch from 12.8s to 9.5s with no loss of
-        protection.
+        The clock is kept per host; requests to different hosts never wait on
+        each other. Why per host: ``README.md`` section "Key Features"
+        (Outbound Link-Rot Detection).
 
         Args:
-            url: The URL about to be requested.
+            url (str): The URL about to be requested.
+
+        Returns:
+            None
         """
         host = urlparse(url).netloc
         elapsed = time.monotonic() - self._last_request_at_host.get(host, 0.0)

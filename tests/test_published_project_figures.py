@@ -1,21 +1,28 @@
-"""Coverage for the figures a project panel copies from another repository.
+"""Tests that figures a project panel quotes from another repository match their source.
 
-The Multi-LLM Evaluation tab quotes how large that project is - test cases,
-requirements traced, recorded responses - and every one of those numbers
-belongs to a repository this site does not control. They were copied from the
-Status tables of the two READMEs, and a copied number is true only on the day
-it is copied: the project moves on, the tab keeps rendering, and the page goes
-on advertising a figure its own source has since revised.
+Created: 2026-11-10
+Last updated: 2026-11-10
 
-So the figures are marked up with the repository and the name of the figure
-they came from, and this test reads each one back off the page and compares it
-against the README that states it. A figure the README no longer states at all
-fails too, because the site would then be quoting a number with no source.
+This file covers one behavior: every figure the Multi-LLM Evaluation tab marks
+as copied from another repository's README (test cases, requirements traced,
+recorded responses) equals the value the Status table of that README states.
+It reads the marked figures through ``LandingPage.published_project_figures``
+and each README through ``utils.readme_figures``.
 
-Marked ``external``: it reads raw.githubusercontent.com, so it is deselected on
-the deployment path and runs weekly with the other checks that depend on a
-third party. A README drifts over weeks, not between pushes, and GitHub being
-briefly unreachable is no reason to fail a deploy.
+The case is marked ``external`` and runs weekly, off the deployment path,
+because it reads ``raw.githubusercontent.com``. A failure means the page quotes
+a figure its source has revised, quotes one its source no longer states, marks
+a figure no pattern can locate, or marks no figures at all.
+
+**A copied number is true only on the day it is copied.** The source project
+moves on while the tab keeps rendering, so each figure is marked up with the
+repository and figure name it came from and read back against its source. A
+figure the README no longer states fails too, since the page would then quote
+a number with no source. A README drifts over weeks, not between pushes, which
+is why weekly is often enough and GitHub being briefly unreachable must not
+fail a deploy.
+
+Specified by ``README.md`` section "Coverage Summary".
 """
 
 from __future__ import annotations
@@ -37,10 +44,17 @@ FEATURE_NAME = "Published Figures Match Their Source"
 @allure.severity(allure.severity_level.NORMAL)
 @pytest.mark.external
 def test_project_figures_match_their_source_readme(desktop_page: LandingPage) -> None:
-    """Every marked figure must equal the value its source README states.
+    """Assert every marked figure equals the value its source README states.
+
+    The page must mark at least one figure, every marked figure must have a
+    pattern in ``FIGURE_PATTERNS``, each must still be stated by its README,
+    and each stated value must equal the one on the page.
 
     Args:
-        desktop_page: Landing Page Object at the 1920x1080 viewport.
+        desktop_page (LandingPage): The landing Page Object at 1920x1080.
+
+    Returns:
+        None
     """
     landing_page = desktop_page.navigate()
 

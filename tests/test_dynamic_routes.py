@@ -1,13 +1,40 @@
-"""Health checks generated dynamically from the crawler's route discovery.
+"""Health checks generated for every route the crawler discovers.
 
-The route list is not written by hand. At collection time the suite either
-re-crawls the site or reuses ``reports/sitemap.json``, then parameterizes every
-test in this module across whatever it found. Publishing a new HTML page is
-therefore all it takes to grow the suite - no test edit required.
+Created: 2026-07-28
+Last updated: 2026-11-10
 
-Each discovered route is checked for a 200 response, a clean console and network
-log, a rendered DOM root, and a layout that fits both the desktop and the mobile
-viewport.
+This file contains six tests, each run once per discovered route: the route
+answers HTTP 200; it loads with a clean first-party console, network and
+JavaScript log; it renders a visible, non-empty DOM root; it publishes a meta
+description within usable length bounds; and it fits the desktop and the mobile
+viewport without horizontal overflow. It also contains the
+``pytest_generate_tests`` hook that parameterizes them and ``_resolve_routes``,
+which supplies the route list.
+
+The route list is resolved at collection time, before any test runs, by
+re-crawling the site or, with ``--use-cached-sitemap``, reading
+``reports/sitemap.json``. The tests run on the deployment path. A failure
+names the route and means that published page is unreachable, broken,
+undescribed or too wide, whichever check failed.
+
+**The route list is not written by hand.** It is resolved once per session and
+memoized, since the hook fires once per test function, so publishing a page
+grows the suite with no test edit. The crawler always reports its seed URL, so
+an unreachable site fails a health check rather than collecting nothing.
+
+**The meta description is checked because nothing else would notice.** Title
+and description are all a search result shows, and neither is visible in the
+rendered page, so a page can lose its description and pass every other check.
+Being parameterized over discovered routes, the check also covers pages not
+yet published: one without a description fails on the first run that finds
+it. Below 50 characters reads as a placeholder; above 160 is truncated in a
+search result.
+
+**Error-log assertions are scoped to the site's own origin**, except unhandled
+JavaScript exceptions, which count whoever served the script.
+
+Specified by ``README.md`` sections "Dynamic Site Discovery" and "Key Features"
+(Origin-Scoped Assertions).
 """
 
 from __future__ import annotations
@@ -27,17 +54,16 @@ from utils.site_crawler import (
 EPIC_NAME = "Portfolio Website Quality"
 FEATURE_NAME = "Dynamic Route Discovery and Health"
 
-#: Collection-time memo of the discovered routes, keyed by base URL.
-#: ``pytest_generate_tests`` runs once per test function, so without this the
-#: site would be crawled once for every test in the module.
+#: MEMOIZED. The discovered routes, keyed by base URL, so the hook that fires
+#: once per test function crawls the site once per session.
 _DISCOVERED_ROUTES: dict[str, list[DiscoveredRoute]] = {}
 
-#: Status a route must return to be considered healthy.
+#: HEALTHY STATUS. The status a route must return.
 EXPECTED_STATUS_CODE = 200
 
-#: Bounds on a useful meta description, in characters. The lower bound rejects a
-#: placeholder that technically satisfies "not empty"; the upper one is where
-#: search results truncate, so anything beyond it is written for nobody.
+#: BOUNDED (added 2026-08-09). The usable length of a meta description, in
+#: characters: shorter reads as a placeholder, longer is truncated in a search
+#: result.
 MIN_DESCRIPTION_LENGTH = 50
 MAX_DESCRIPTION_LENGTH = 160
 
@@ -46,12 +72,13 @@ def _resolve_routes(config: pytest.Config) -> list[DiscoveredRoute]:
     """Return the routes to parameterize over, crawling only when necessary.
 
     Args:
-        config: The pytest config, consulted for ``--use-cached-sitemap``.
+        config (pytest.Config): The pytest config, read for
+            ``--use-cached-sitemap``.
 
     Returns:
-        The discovered routes. The crawler always reports its seed URL, so this
-        never returns an empty list - an unreachable site surfaces as a failing
-        health check rather than a silently empty test suite.
+        list[DiscoveredRoute]: The discovered routes, never empty, since the
+        crawler always reports its seed URL. An empty or missing cache falls
+        back to a crawl.
     """
     framework_settings = Settings.from_env()
     memoized_routes = _DISCOVERED_ROUTES.get(framework_settings.base_url)
@@ -69,10 +96,15 @@ def _resolve_routes(config: pytest.Config) -> list[DiscoveredRoute]:
 
 
 def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
-    """Parameterize route-aware tests across every discovered route.
+    """Parameterize each test taking ``discovered_route`` across every route.
+
+    Test ids are the route paths.
 
     Args:
-        metafunc: The test function being collected.
+        metafunc (pytest.Metafunc): The test function being collected.
+
+    Returns:
+        None
     """
     if "discovered_route" in metafunc.fixturenames:
         routes = _resolve_routes(metafunc.config)
@@ -89,11 +121,15 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
 def test_route_responds_with_http_200(
     desktop_route_page: RoutePage, discovered_route: DiscoveredRoute
 ) -> None:
-    """A discovered route must still serve a 200 when the test runs.
+    """Assert a discovered route still answers HTTP 200 when the test runs.
 
     Args:
-        desktop_route_page: Diagnostics-recording page at the desktop viewport.
-        discovered_route: One route supplied by the discovery engine.
+        desktop_route_page (RoutePage): The diagnostics-recording route Page
+            Object at the desktop viewport.
+        discovered_route (DiscoveredRoute): The route this case checks.
+
+    Returns:
+        None
     """
     with allure.step(f"Navigate to {discovered_route.url}"):
         observed_status = desktop_route_page.open_route(discovered_route.url)
@@ -114,22 +150,22 @@ def test_route_responds_with_http_200(
 def test_route_loads_without_console_or_network_errors(
     desktop_route_page: RoutePage, discovered_route: DiscoveredRoute
 ) -> None:
-    """No route may log a console error, break a request, or throw in JavaScript.
+    """Assert a route loads with no first-party error and no JavaScript exception.
 
-    The three network-facing assertions are scoped to the site's own origin,
-    and that scoping is the whole reason this test can stay on the deployment
-    path. Every project panel embeds a CI badge image served by GitHub, so an
-    unscoped assertion here would fail this suite whenever GitHub had a bad
-    minute - a third-party dependency arriving through a sub-resource rather
-    than through anything the test does on purpose. Third-party problems are
-    still recorded and still reported; they simply do not decide the verdict.
-
-    Unhandled JavaScript exceptions are not scoped that way, deliberately: an
-    exception is raised by a script this site chose to run, whoever served it.
+    Broken resources, failed requests and console errors count only when they
+    belong to the site's own origin; third-party ones are recorded and attached
+    but do not decide the verdict. Unhandled JavaScript exceptions count
+    whoever served the script. When sub-resources have not settled, each
+    message says the list may be incomplete. Design: ``README.md`` section
+    "Key Features" (Origin-Scoped Assertions).
 
     Args:
-        desktop_route_page: Diagnostics-recording page at the desktop viewport.
-        discovered_route: One route supplied by the discovery engine.
+        desktop_route_page (RoutePage): The diagnostics-recording route Page
+            Object at the desktop viewport.
+        discovered_route (DiscoveredRoute): The route this case checks.
+
+    Returns:
+        None
     """
     with allure.step(f"Navigate to {discovered_route.url}"):
         desktop_route_page.open_route(discovered_route.url)
@@ -185,11 +221,15 @@ def test_route_loads_without_console_or_network_errors(
 def test_route_renders_a_visible_dom_root(
     desktop_route_page: RoutePage, discovered_route: DiscoveredRoute
 ) -> None:
-    """A 200 response is not enough: the route must render actual content.
+    """Assert a route renders a visible body containing text, not just a 200.
 
     Args:
-        desktop_route_page: Diagnostics-recording page at the desktop viewport.
-        discovered_route: One route supplied by the discovery engine.
+        desktop_route_page (RoutePage): The diagnostics-recording route Page
+            Object at the desktop viewport.
+        discovered_route (DiscoveredRoute): The route this case checks.
+
+    Returns:
+        None
     """
     with allure.step(f"Navigate to {discovered_route.url}"):
         desktop_route_page.open_route(discovered_route.url)
@@ -212,21 +252,18 @@ def test_route_renders_a_visible_dom_root(
 def test_route_publishes_a_meta_description(
     desktop_route_page: RoutePage, discovered_route: DiscoveredRoute
 ) -> None:
-    """A route must describe itself to a search result, within usable bounds.
+    """Assert a route declares a non-blank meta description of usable length.
 
-    The description and the title are the whole of what a search result shows,
-    and neither is visible anywhere in the rendered page - so a page can lose
-    its description, or never have had one, and look completely healthy to every
-    other check in this suite. That is precisely the kind of claim this suite
-    exists to hold: invisible from a browser, and wrong until something reads it.
-
-    Being parameterized over discovered routes, this also covers pages that do
-    not exist yet: publish one without a description and it fails on the run
-    that first discovers it, rather than quietly ranking on nothing.
+    The length must lie between ``MIN_DESCRIPTION_LENGTH`` and
+    ``MAX_DESCRIPTION_LENGTH`` after trimming.
 
     Args:
-        desktop_route_page: Diagnostics-recording page at the desktop viewport.
-        discovered_route: One route supplied by the discovery engine.
+        desktop_route_page (RoutePage): The diagnostics-recording route Page
+            Object at the desktop viewport.
+        discovered_route (DiscoveredRoute): The route this case checks.
+
+    Returns:
+        None
     """
     with allure.step(f"Navigate to {discovered_route.url}"):
         desktop_route_page.open_route(discovered_route.url)
@@ -274,11 +311,15 @@ def test_route_publishes_a_meta_description(
 def test_route_fits_the_desktop_viewport(
     desktop_route_page: RoutePage, discovered_route: DiscoveredRoute
 ) -> None:
-    """No route may scroll sideways at 1920x1080.
+    """Assert a route does not overflow horizontally at 1920x1080.
 
     Args:
-        desktop_route_page: Diagnostics-recording page at the desktop viewport.
-        discovered_route: One route supplied by the discovery engine.
+        desktop_route_page (RoutePage): The diagnostics-recording route Page
+            Object at the desktop viewport.
+        discovered_route (DiscoveredRoute): The route this case checks.
+
+    Returns:
+        None
     """
     with allure.step(f"Navigate to {discovered_route.url}"):
         desktop_route_page.open_route(discovered_route.url)
@@ -298,11 +339,15 @@ def test_route_fits_the_desktop_viewport(
 def test_route_fits_the_mobile_viewport(
     mobile_route_page: RoutePage, discovered_route: DiscoveredRoute
 ) -> None:
-    """No route may scroll sideways at 390x844.
+    """Assert a route does not overflow horizontally at 390x844.
 
     Args:
-        mobile_route_page: Diagnostics-recording page at the mobile viewport.
-        discovered_route: One route supplied by the discovery engine.
+        mobile_route_page (RoutePage): The diagnostics-recording route Page
+            Object at the mobile viewport.
+        discovered_route (DiscoveredRoute): The route this case checks.
+
+    Returns:
+        None
     """
     with allure.step(f"Navigate to {discovered_route.url}"):
         mobile_route_page.open_route(discovered_route.url)

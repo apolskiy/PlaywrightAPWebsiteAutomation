@@ -1,13 +1,44 @@
-"""Shared Playwright behavior inherited by every Page Object in the suite.
+"""Browser plumbing every Page Object in the suite inherits.
 
-:class:`BasePage` owns the low-level browser plumbing (navigation, viewport
-control, DOM capture) so that concrete Page Objects only describe the semantics
-of their own screen. No test module is expected to import this class directly.
+Created: 2026-07-28
+Last updated: 2026-11-10
 
-Every page also carries a :class:`~utils.page_diagnostics.PageDiagnostics`
-recorder, so that whatever the browser complains about is available both to the
-test that hit it and to the failure hook that reports it - regardless of which
-Page Object the test happens to be driving.
+This file contains ``BasePage``, which navigates, resizes the viewport, waits
+for sub-resources, captures the title, DOM and a screenshot, measures layout
+(scroll width, overflow, wrapped rows, an image's intrinsic size, a computed
+color) and reads the suite-size figures a page publishes. It also contains the
+``SUB_RESOURCE_SETTLE_TIMEOUT_MS`` bound.
+
+``LandingPage`` and ``RoutePage`` extend it, and no test module imports it
+directly. The fixtures in ``conftest.py`` construct those subclasses, and the
+failure hook reads the DOM, screenshot and diagnostics through this class, so a
+fault here shows up in every suite and in every failure report at once.
+
+**Every page carries a diagnostics recorder.** ``self.diagnostics`` is a
+``PageDiagnostics`` collaborator rather than more methods on this class, because
+it drives nothing and reads nothing; it only listens. Fixtures arm it before the
+first navigation, since Playwright delivers no event that predates its listener.
+
+**Navigation waits for ``domcontentloaded`` only.** The site decorates its DOM
+from a ``DOMContentLoaded`` listener, and every later wait is a web-first
+assertion rather than a network-idle guess.
+
+**Settling sub-resources is short and never fatal.** ``settle_sub_resources``
+waits for ``load`` so a broken stylesheet or icon has reported itself before a
+check reads the error log. A timeout returns False rather than failing, because
+the page embeds CI badges served by GitHub and a slow ``load`` must not bring a
+third party's availability into the verdict.
+
+**An image is loaded when it has an intrinsic size.** Visibility proves nothing:
+an ``<img>`` with alt text and explicit dimensions occupies layout space when its
+source is missing, while a broken image reports ``0x0``.
+
+**Row counts round to whole pixels**, since sub-pixel layout rounding differs
+per platform and would otherwise report extra rows.
+
+Specified by ``README.md`` sections "Test Design Principles" and "Project
+Architecture", and the Key Features entries "Origin-Scoped Assertions" and
+"Published Figures Verify Themselves".
 """
 
 from __future__ import annotations
@@ -18,48 +49,44 @@ from playwright.sync_api import Error as PlaywrightError, Locator, Page
 
 from utils.page_diagnostics import PageDiagnostics
 
-#: How long to let sub-resources finish before reading the diagnostic log, in
-#: milliseconds. Deliberately short and deliberately not fatal - see
-#: :meth:`BasePage.settle_sub_resources`.
+#: BOUNDED AND NOT FATAL (added 2026-08-11). How long, in milliseconds,
+#: :meth:`BasePage.settle_sub_resources` lets sub-resources finish before the
+#: diagnostic log is read.
 SUB_RESOURCE_SETTLE_TIMEOUT_MS: Final[int] = 5_000
 
 
 class BasePage:
-    """Common wrapper around a Playwright :class:`~playwright.sync_api.Page`.
+    """Wrap a Playwright :class:`~playwright.sync_api.Page` with shared behavior.
 
     Args:
-        page: The Playwright page bound to this Page Object instance.
+        page (Page): The Playwright page bound to this Page Object.
     """
 
     def __init__(self, page: Page) -> None:
         self._page = page
-        #: Recorder for the errors the browser raises against this page. Held
-        #: as a collaborator rather than folded in as more methods: it drives
-        #: nothing and reads nothing, it only listens. Fixtures arm it before
-        #: the first navigation, because Playwright delivers no event that
-        #: predates its listener.
+        #: Records the errors the browser raises against this page (added
+        #: 2026-08-11). Fixtures arm it before the first navigation.
         self.diagnostics = PageDiagnostics(page)
 
     @property
     def page(self) -> Page:
-        """The underlying Playwright page.
+        """Return the underlying Playwright page.
 
         Returns:
-            The page handed to the constructor. Exposed for fixtures and
-            diagnostics hooks; tests should prefer the semantic accessors
-            published by the concrete Page Object.
+            Page: The page handed to the constructor, for fixtures and
+            diagnostics hooks. Tests use the concrete Page Object's semantic
+            accessors instead.
         """
         return self._page
 
     def open(self, url: str) -> None:
         """Navigate to ``url`` and wait for the initial document to parse.
 
-        ``domcontentloaded`` is deliberate: the site decorates the DOM from a
-        ``DOMContentLoaded`` listener, and every subsequent wait in this suite is
-        expressed as a web-first assertion rather than a network-idle guess.
-
         Args:
-            url: Absolute URL to navigate to.
+            url (str): The absolute URL to navigate to.
+
+        Returns:
+            None
         """
         self._page.goto(url, wait_until="domcontentloaded")
 
@@ -67,31 +94,23 @@ class BasePage:
         """Resize the viewport, triggering any CSS media-query re-layout.
 
         Args:
-            width: Viewport width in CSS pixels.
-            height: Viewport height in CSS pixels.
+            width (int): The viewport width in CSS pixels.
+            height (int): The viewport height in CSS pixels.
+
+        Returns:
+            None
         """
         self._page.set_viewport_size({"width": width, "height": height})
 
     def settle_sub_resources(self) -> bool:
-        """Give images, styles, and scripts a moment to finish loading.
+        """Wait briefly for images, styles and scripts to finish loading.
 
-        Every navigation in this suite waits for ``domcontentloaded``, which is
-        the right readiness signal for interacting with the page but the wrong
-        one for reading its error log: at that moment the sub-resources are
-        still in flight, so a broken stylesheet or a missing icon has not
-        reported itself yet and a check reading the log immediately would be
-        racing them.
-
-        The wait is short, and a timeout is *not* an error. The page under test
-        embeds CI badges served by GitHub, so ``load`` genuinely may not arrive
-        promptly - and turning that into a failure would import a third party's
-        availability into the suite through the back door, which is precisely
-        what this design is trying to avoid. A caller that did not settle simply
-        reports on whatever had been observed by then.
+        Waits up to ``SUB_RESOURCE_SETTLE_TIMEOUT_MS`` for the ``load`` event. A
+        caller that did not settle reports on whatever had been observed by then.
 
         Returns:
-            ``True`` when the ``load`` event arrived within the timeout,
-            ``False`` when the wait expired or the page could not be reached.
+            bool: True when ``load`` arrived within the timeout, False when the
+            wait expired or the page could not be reached.
         """
         try:
             self._page.wait_for_load_state(
@@ -105,32 +124,32 @@ class BasePage:
         """Return the document title.
 
         Returns:
-            The current value of ``document.title``.
+            str: The current value of ``document.title``.
         """
         return self._page.title()
 
     def dom_snapshot(self) -> str:
-        """Capture the fully rendered HTML of the current document.
+        """Return the fully rendered HTML of the current document.
 
         Returns:
-            The serialized DOM, including any nodes injected by client-side
-            scripts. Used by the Claude diagnostics hook on assertion failure.
+            str: The serialized DOM, including nodes injected by client-side
+            scripts. The Claude diagnostics hook reads it on failure.
         """
         return self._page.content()
 
     def screenshot_png(self) -> bytes:
-        """Capture a full-page screenshot.
+        """Return a full-page screenshot.
 
         Returns:
-            PNG-encoded bytes of the entire scrollable page.
+            bytes: PNG-encoded bytes of the entire scrollable page.
         """
         return self._page.screenshot(full_page=True)
 
     def document_scroll_width(self) -> int:
-        """Measure the horizontal scroll extent of the document.
+        """Return the horizontal scroll extent of the document.
 
         Returns:
-            ``document.documentElement.scrollWidth`` in CSS pixels. A value
+            int: ``document.documentElement.scrollWidth`` in CSS pixels. A value
             greater than the viewport width means the layout overflows sideways.
         """
         return int(self._page.evaluate("() => document.documentElement.scrollWidth"))
@@ -139,11 +158,11 @@ class BasePage:
         """Return the current viewport width.
 
         Returns:
-            Width of the viewport in CSS pixels.
+            int: The width of the viewport in CSS pixels.
 
         Raises:
-            RuntimeError: If the browser context was created without a viewport
-                (headless "no viewport" mode), which this suite never does.
+            RuntimeError: When the browser context was created without a
+                viewport ("no viewport" mode), which this suite never does.
         """
         viewport = self._page.viewport_size
         if viewport is None:
@@ -152,32 +171,27 @@ class BasePage:
 
     @staticmethod
     def computed_color(locator: Locator) -> str:
-        """Read the resolved text color of an element.
+        """Return the resolved text color of an element.
 
         Args:
-            locator: A locator resolving to exactly one element.
+            locator (Locator): A locator resolving to exactly one element.
 
         Returns:
-            The computed ``color`` property, always in the browser's normalized
-            ``rgb(r, g, b)`` form regardless of how the stylesheet spelled it.
+            str: The computed ``color`` property, always in the browser's
+            normalized ``rgb(r, g, b)`` form however the stylesheet spelled it.
         """
         return str(locator.evaluate("element => getComputedStyle(element).color"))
 
     @staticmethod
     def image_natural_size(locator: Locator) -> tuple[int, int]:
-        """Read an image's intrinsic size once the browser has decoded it.
-
-        Visibility is not proof that an image loaded: an ``<img>`` with alt text
-        and explicit dimensions still occupies layout space when its source is
-        missing or forbidden. Intrinsic size is the honest signal - a broken
-        image reports ``0x0``.
+        """Return an image's intrinsic size once the browser has decoded it.
 
         Args:
-            locator: A locator resolving to exactly one ``<img>`` element.
+            locator (Locator): A locator resolving to exactly one ``<img>``.
 
         Returns:
-            The ``(naturalWidth, naturalHeight)`` pair in pixels, or ``(0, 0)``
-            when the image failed to load.
+            tuple[int, int]: The ``(naturalWidth, naturalHeight)`` pair in
+            pixels, or ``(0, 0)`` when the image failed to load.
         """
         width, height = locator.evaluate(
             "async image => {"
@@ -188,17 +202,14 @@ class BasePage:
         return int(width), int(height)
 
     def published_suite_counts(self) -> dict[str, int]:
-        """Read every suite-size figure the current page publishes to a reader.
+        """Return every suite-size figure the current page shows a reader.
 
-        The site quotes the size of this suite in prose, on more than one page.
-        Those figures are marked up rather than left as bare text so a test can
-        read exactly what a reader sees, which is what allows the claim to be
-        compared against the suite instead of maintained by hand.
+        Reads each ``span.suite-count`` element by its ``data-scope``.
 
         Returns:
-            Mapping of scope name - ``total`` for the whole suite, ``deploy``
-            for the deployment path - to the integer the page displays. Scopes
-            the page does not mention are absent rather than zero.
+            dict[str, int]: The displayed integer per scope, ``total`` for the
+            whole suite and ``deploy`` for the deployment path. A scope the page
+            does not mention is absent rather than zero.
         """
         return {
             str(scope): int(text.strip())
@@ -210,35 +221,34 @@ class BasePage:
         }
 
     def has_horizontal_overflow(self) -> bool:
-        """Detect whether the layout scrolls sideways at the current viewport.
+        """Return whether the layout scrolls sideways at the current viewport.
 
         Returns:
-            ``True`` when the document is wider than the viewport. Sub-pixel
-            rounding is tolerated by allowing a one-pixel margin.
+            bool: True when the document is wider than the viewport by more than
+            one pixel, the margin allowed for sub-pixel rounding.
         """
         return self.document_scroll_width() > self.viewport_width() + 1
 
     @staticmethod
     def distinct_row_count(locator: Locator) -> int:
-        """Count how many distinct horizontal rows a locator's elements occupy.
+        """Return how many distinct horizontal rows a locator's elements occupy.
 
-        Bounding boxes are only read after every matched element has been laid
-        out, so the measurement reflects a settled layout rather than a frame
-        captured mid-reflow.
+        Bounding boxes are read only after every matched element is laid out, so
+        the count reflects a settled layout rather than a mid-reflow frame.
 
         Args:
-            locator: A locator resolving to one or more visible elements.
+            locator (Locator): A locator resolving to one or more visible
+                elements.
 
         Returns:
-            The number of unique vertical offsets among the matched elements.
-            ``1`` means a single row; anything greater means the elements
-            wrapped onto additional lines.
+            int: The number of unique vertical offsets among the elements.
+            ``1`` means a single row; more means they wrapped.
         """
         vertical_offsets: set[int] = set()
         for element_index in range(locator.count()):
             bounding_box = locator.nth(element_index).bounding_box()
             if bounding_box is not None:
-                # Round to whole pixels: sub-pixel layout rounding differs per
-                # platform and would otherwise report false extra rows.
+                # Decided 2026-07-28: round to whole pixels, since sub-pixel
+                # rounding differs per platform and reports false extra rows.
                 vertical_offsets.add(round(bounding_box["y"]))
         return len(vertical_offsets)

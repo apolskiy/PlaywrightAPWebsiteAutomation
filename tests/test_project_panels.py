@@ -1,23 +1,40 @@
-"""Completeness and internal-consistency coverage for the project panels.
+"""Tests that every project panel is complete and describes only its own repositories.
 
-Each project tab is a table describing one project, and the rows are written by
-hand per project. That makes two failures likely. The first is omission: a
-panel ships without the row its siblings all carry, and nothing notices, because
-every individual assertion elsewhere in the suite still passes. The second
-arrives with the panel that was started by copying a sibling - the rows are all
-present, all well-formed, and one of them still names the repository it was
-copied from.
+Created: 2026-07-30
+Last updated: 2026-11-10
 
-Most projects live in one repository, but not all: the Multi-LLM Evaluation
-project is a harness and its test cases, split into two repositories so each
-can change without destabilizing the other, and its panel describes both. So
-the contract is stated against the repositories each panel declares rather than
-against "one repository per panel" - a panel must cover every repository it
-declares, and must not cite one it does not.
+This file covers four behaviors, each parameterized over every project tab: a
+panel publishes one README link per repository it declares, decoded to an
+absolute ``https`` target; it publishes at least one CI status badge per
+repository, each from this account and carrying alt text; its Repo,
+Documentation and badge rows all reduce to exactly the repositories it declares;
+and its documentation links open in a new tab hardened with
+``noopener noreferrer``. The private ``_attribute_values`` helper normalizes
+attribute reads.
 
-These tests assert the properties across every project at once, so a new project
-tab is held to the same contract the existing ones meet rather than inheriting
-whatever its author remembered to change.
+The cases run on the deployment path against the desktop landing page. A
+failure means a panel shipped missing a row its siblings carry, or still names
+a repository it was copied from, so a reader of that panel is sent to, or shown
+the build health of, the wrong project.
+
+**The contract is per declared repository.** ``PROJECT_REPOSITORIES`` lists the
+repositories each panel describes, one for most projects and two for Multi-LLM
+Evaluation, whose harness and test cases live in separate repositories so each
+can change without destabilizing the other. A panel must cover every repository
+it declares and cite none it does not. A new project tab is held to the same
+contract by being added there.
+
+**The Documentation row is a reader's one way in.** A panel without it, or with
+one link for two repositories, leaves part of the project with no route to its
+prose, so each link must reach a README rather than a repository root. Off-site
+targets open in a new tab so the reader keeps their place, and ``rel`` must
+close the reverse-tabnabbing exposure ``target="_blank"`` opens.
+
+**Badges are read by ``src``, never rendered**, because the images are served
+by github.com and the verdict may not depend on a third party.
+
+Specified by ``README.md`` sections "Key Features" (Panels Checked Against
+Themselves), "Test Design Principles" and "Coverage Summary".
 """
 
 from __future__ import annotations
@@ -31,9 +48,10 @@ from pages.landing_page import LandingPage, NavigationTab, github_repository
 EPIC_NAME = "Portfolio Website Quality"
 FEATURE_NAME = "Project Panel Completeness"
 
-#: The repositories each project tab describes, lower-cased ``owner/name``, in
-#: the order the panel lists them. Home and Engineering Outcomes are
-#: cross-project index pages and carry no project table of their own.
+#: DECLARED REPOSITORIES (two per panel allowed since 2026-11-10). The
+#: repositories each project tab describes, lower-cased ``owner/name``, in the
+#: order the panel lists them. Home and Engineering Outcomes are cross-project
+#: index pages and carry no project table.
 PROJECT_REPOSITORIES: dict[NavigationTab, tuple[str, ...]] = {
     NavigationTab.REST_API: ("apolskiy/countryweather",),
     NavigationTab.PORTFOLIO_WEBSITE: ("apolskiy/apolskiy.github.io",),
@@ -44,23 +62,24 @@ PROJECT_REPOSITORIES: dict[NavigationTab, tuple[str, ...]] = {
     NavigationTab.LLM_EVALUATION: ("apolskiy/ap-harness-qc", "apolskiy/ap-model-qc"),
 }
 
-#: The project tabs, in navigation order, for parametrization.
+#: PARAMETERS. The project tabs, in navigation order.
 PROJECT_TABS: tuple[NavigationTab, ...] = tuple(PROJECT_REPOSITORIES)
 
-#: Accepted spellings of a README target, lower-cased before comparison. The
-#: site links a mix of `README.md` and `readme.md` because the repositories
-#: themselves are inconsistent, and that is the repositories' business.
+#: CASE-BLIND, decided 2026-07-30. Accepted endings of a README target, matched
+#: lower-cased: the site links both ``README.md`` and ``readme.md`` because the
+#: repositories themselves differ, and that is the repositories' business.
 README_SUFFIXES = ("readme.md",)
 
 
 def _attribute_values(locator_values: list[str | None]) -> list[str]:
-    """Normalize attribute reads, turning a missing attribute into an empty string.
+    """Return attribute reads with a missing attribute turned into an empty string.
 
     Args:
-        locator_values: Raw ``get_attribute`` results, one per element.
+        locator_values (list[str | None]): Raw ``get_attribute`` results, one
+            per element.
 
     Returns:
-        The same values with ``None`` replaced by ``""``.
+        list[str]: The same values with None replaced by ``""``.
     """
     return [value or "" for value in locator_values]
 
@@ -74,16 +93,17 @@ def _attribute_values(locator_values: list[str | None]) -> list[str]:
 def test_project_panel_publishes_a_documentation_link(
     desktop_page: LandingPage, project_tab: NavigationTab
 ) -> None:
-    """A project panel must carry one README link per repository it describes.
+    """Assert a panel carries one visible README link per repository it declares.
 
-    A reader who wants depth on a project has exactly one next step from the
-    panel, and it is this row. A panel missing it is a dead end, and a panel
-    describing two repositories but documenting one leaves half the project
-    without a way in.
+    Each link must be decoded to an absolute ``https`` target ending in
+    ``readme.md``, in any case.
 
     Args:
-        desktop_page: Landing Page Object at the 1920x1080 viewport.
-        project_tab: The project panel under inspection.
+        desktop_page (LandingPage): The landing Page Object at 1920x1080.
+        project_tab (NavigationTab): The project panel under inspection.
+
+    Returns:
+        None
     """
     expected_count = len(PROJECT_REPOSITORIES[project_tab])
     landing_page = desktop_page.navigate()
@@ -129,21 +149,19 @@ def test_project_panel_publishes_a_documentation_link(
 def test_project_panel_publishes_a_ci_status_badge(
     desktop_page: LandingPage, project_tab: NavigationTab
 ) -> None:
-    """A project panel must carry CI badges sourced from its own repositories.
+    """Assert a panel carries at least one CI status badge per declared repository.
 
-    The badge is the one element on the page that reports whether the project
-    currently works. A panel without one asks the reader to take the project's
-    health on trust. A panel describing a chain of workflows may carry one
-    badge per gate in the chain, but every one of them must be a real status
-    badge with alternative text.
-
-    The assertion deliberately inspects the ``src`` rather than waiting for the
-    image to render. Badge images are fetched from github.com, and a deploy
-    signal must not depend on that host being reachable from the runner.
+    A panel describing a chain of workflows may carry one badge per gate. Every
+    badge ``src`` must start with ``https://github.com/apolskiy/`` and contain
+    ``/badge.svg``, and every badge must carry alt text. The ``src`` is read,
+    not rendered.
 
     Args:
-        desktop_page: Landing Page Object at the 1920x1080 viewport.
-        project_tab: The project panel under inspection.
+        desktop_page (LandingPage): The landing Page Object at 1920x1080.
+        project_tab (NavigationTab): The project panel under inspection.
+
+    Returns:
+        None
     """
     landing_page = desktop_page.navigate()
     landing_page.open_tab(project_tab)
@@ -199,26 +217,21 @@ def test_project_panel_publishes_a_ci_status_badge(
 def test_project_panel_rows_agree_on_its_repositories(
     desktop_page: LandingPage, project_tab: NavigationTab
 ) -> None:
-    """A panel's repositories, badges, and READMEs must belong to the same project.
+    """Assert a panel's repository, documentation and badge rows name its repositories.
 
-    Each of those rows is asserted elsewhere, and each of those assertions
-    passes on a panel that is quietly describing a different project. The badge
-    check only requires a source under this author's account, which is true of
-    every repository he owns, so a panel begun by copying a sibling can keep the
-    sibling's badge and stay green - reporting a build result that belongs to
-    someone else, on the one row of the page whose entire purpose is to say
-    whether this project currently works.
-
-    Nothing about that is visible from the rendered page: the badge draws, the
-    links resolve, and the reader has no way to know the green is unrelated. It
-    is caught by comparing every row against the repositories the panel
-    declares: the Repo and Documentation rows must name exactly those, in the
-    declared order, and every badge must come from one of them, with each
-    declared repository reporting at least one.
+    Every target must reduce to an ``owner/name``. The Repo and Documentation
+    rows must name exactly the declared repositories, in the declared order;
+    every badge must come from one of them, and each declared repository must
+    report at least one badge. Why the per-row checks alone pass on a panel
+    copied from a sibling: ``README.md`` section "Key Features" (Panels Checked
+    Against Themselves).
 
     Args:
-        desktop_page: Landing Page Object at the 1920x1080 viewport.
-        project_tab: The project panel under inspection.
+        desktop_page (LandingPage): The landing Page Object at 1920x1080.
+        project_tab (NavigationTab): The project panel under inspection.
+
+    Returns:
+        None
     """
     declared = PROJECT_REPOSITORIES[project_tab]
     landing_page = desktop_page.navigate()
@@ -286,16 +299,17 @@ def test_project_panel_rows_agree_on_its_repositories(
 def test_documentation_link_opens_in_a_hardened_new_tab(
     desktop_page: LandingPage, project_tab: NavigationTab
 ) -> None:
-    """Documentation links must leave the site in a new, hardened tab.
+    """Assert every documentation link opens a new tab with ``noopener noreferrer``.
 
-    Every one of these targets is off-site, so losing the reader's place in the
-    portfolio to follow one is a needless cost. ``target="_blank"`` without
-    ``rel="noopener noreferrer"`` is the reverse-tabnabbing exposure the rest of
-    the suite already guards against; this pins it per project.
+    The row must publish at least one link, and each must carry
+    ``target="_blank"`` and both ``rel`` tokens.
 
     Args:
-        desktop_page: Landing Page Object at the 1920x1080 viewport.
-        project_tab: The project panel under inspection.
+        desktop_page (LandingPage): The landing Page Object at 1920x1080.
+        project_tab (NavigationTab): The project panel under inspection.
+
+    Returns:
+        None
     """
     landing_page = desktop_page.navigate()
     landing_page.open_tab(project_tab)
