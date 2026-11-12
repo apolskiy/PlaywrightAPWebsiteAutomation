@@ -23,6 +23,24 @@ in the evening in one timezone still agrees with the commit that carries it.
 
 ---
 
+## v1.5.0 - 2026-11-12
+
+### Added
+
+- **`PAWA_10044`, every published CI badge names a workflow that still
+  exists.** GitHub answers a badge request for a workflow file that was renamed
+  or deleted with 404, and the panel then shows a broken image where the
+  project's build status belongs. Nothing caught it: a badge links to the
+  repository's Actions page, not to the workflow, so the link-rot check never
+  fetched the badge, and the panel tests read the `src` without resolving it so
+  that GitHub's availability never decides a deploy. The Multi-LLM Evaluation
+  tab now carries twelve badges for AP-Model-QC, whose workflows have been
+  renamed before. `LandingPage.published_badge_sources` reads every badge on
+  the page; the test resolves each through the link auditor and fails on 404
+  or 410, the link-rot rule. Marked `external` and run weekly. Verified by
+  mutation: one badge pointed at a renamed workflow fails, naming it. The suite
+  collects 94 tests, 90 of them on the deployment path.
+
 ## v1.4.1 - 2026-11-10
 
 ### Changed

@@ -1,7 +1,7 @@
 """The Page Object for the single-page portfolio at https://apolskiy.github.io/.
 
 Created: 2026-07-28
-Last updated: 2026-11-10
+Last updated: 2026-11-12
 
 This file contains ``LandingPage``, the Page Object every landing-page test
 drives; ``NavigationTab``, the enum declaring every published tab with its
@@ -632,6 +632,18 @@ class LandingPage(BasePage):
             describing one repository, one per gate for a chain of workflows.
         """
         return self.project_row(tab, CI_STATUS_ROW_LABEL).locator("img.ci-badge")
+
+    def published_badge_sources(self) -> list[str]:
+        """Return the ``src`` of every CI status badge the page publishes.
+
+        Returns:
+            list[str]: Distinct non-empty badge sources in document order, read
+            from every panel whether or not it is shown.
+        """
+        sources = self.page.eval_on_selector_all(
+            "img.ci-badge", "nodes => nodes.map(node => node.getAttribute('src'))"
+        )
+        return list(dict.fromkeys(str(source) for source in sources if source))
 
     def published_project_figures(self) -> list[tuple[str, str, int]]:
         """Return every figure a panel attributes to another repository's README.

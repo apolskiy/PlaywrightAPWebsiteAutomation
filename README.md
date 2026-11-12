@@ -261,7 +261,7 @@ def test_footer_owner_link_shares_the_table_hover_color(...) -> None:
 
 IDs run from `PAWA_10001` and are **never reused** - deleting a test retires
 its number rather than freeing it. The suite currently occupies `PAWA_10001`
-to `PAWA_10043`; the next free identifier is `PAWA_10044`.
+to `PAWA_10044`; the next free identifier is `PAWA_10045`.
 
 The identifier exists because **a test's name is not a stable identity**. Any
 store keyed on the name forks a test's history the moment it is renamed, turning
@@ -318,7 +318,7 @@ Verified clean afterwards on every tab at 320px, 390px, and 600px, on both Chrom
 
 ## Coverage Summary
 
-<sub>v1.4.0 &middot; 2026-11-10</sub>
+<sub>v1.5.0 &middot; 2026-11-12</sub>
 
 | Suite | Scenarios | Focus |
 | --- | --- | --- |
@@ -328,15 +328,16 @@ Verified clean afterwards on every tab at 320px, 390px, and 600px, on both Chrom
 | `test_link_obfuscation.py` | 7 | Placeholder decoding, safe URL schemes, outbound link-rot detection, `noopener noreferrer` hardening, address never rendered as text, copyright owner link, `noscript` fallback |
 | `test_link_styling.py` | 1 | Copyright link shares the table hover color, and hovering visibly changes it |
 | `test_project_panels.py` | 28 | Per project panel, held to the repositories it declares (one for most projects, two for Multi-LLM Evaluation): one README link per repository, decoded to an absolute target and opening in a hardened new tab; at least one CI badge per repository, each sourced from this account and carrying alt text; and the repository, documentation and badge rows reduced to `owner/name` and required to name exactly the declared repositories |
+| `test_published_badges.py` | 1 | Every CI status badge on the page names a workflow that still exists: a renamed or deleted workflow answers 404 and shows a broken image where a project's build status belongs |
 | `test_published_image_claims.py` | 1 | The published `apolskiy/flask_app` image installs Flask's dependency closure and nothing beyond it |
 | `test_published_project_figures.py` | 1 | Every figure the Multi-LLM Evaluation tab quotes from another repository matches the Status table of that repository's README |
 | `test_published_suite_size.py` | 2 | The suite-size figures quoted on the Web Automation tab and in the CI case study match the suite that is running |
 | `test_runtime_health.py` | 1 | Walking every tab in sequence leaves the browser's error log clean - the load-time checks below never exercise the router or the decoder, because neither runs until something is clicked |
 | `test_dynamic_routes.py` | 6 × routes | Per discovered route: HTTP 200, first-party console/network/JS error log, visible DOM root, a meta description within usable length bounds, desktop and mobile overflow |
 
-**90 tests on the deployment path, plus 3 that run weekly - 93 in total**, collected against the live site today (6 dynamic × 3 discovered routes) and growing automatically as pages are published and as navigation tabs are added.
+**90 tests on the deployment path, plus 4 that run weekly - 94 in total**, collected against the live site today (6 dynamic × 3 discovered routes) and growing automatically as pages are published and as navigation tabs are added.
 
-The deployment pipeline runs `pytest -m "not external"`, which is the 90, depending on nothing but this site. The three `external` tests reach third parties - one resolves outbound links, one reads the published container image, and one reads the READMEs whose figures the Multi-LLM Evaluation tab quotes - and run weekly via `external-links.yml`, or on demand with `pytest -m external`.
+The deployment pipeline runs `pytest -m "not external"`, which is the 90, depending on nothing but this site. The four `external` tests reach third parties - one resolves outbound links, one resolves every CI badge, one reads the published container image, and one reads the READMEs whose figures the Multi-LLM Evaluation tab quotes - and run weekly via `external-links.yml`, or on demand with `pytest -m external`.
 
 Three suites grow on their own, all from the same declaration. `test_navigation.py` parameterizes over `NavigationTab`, so publishing any tab adds a case; `test_project_panels.py` and `test_engineering_outcomes.py` parameterize over the subset of those tabs that describe a project, contributing four cases and one respectively. The Multi-LLM Evaluation tab added six this way; its only test edit was declaring the two repositories it describes.
 
